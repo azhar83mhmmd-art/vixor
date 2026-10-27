@@ -1,0 +1,3 @@
+buat saat chatingan bisa kirim foto/video juga, dan tambahkan fitur saluran di pembaruan, bisa bikin saluran sendiri seperti komunitas, hanya admin yg bisa mengirim chat di saluran dan user bisa mengikuti saluran tersebut maka akan muncul seperti di WhatsApp, dan buat rekomendasi minimal 10 saluran teratas untuk di ikuti, dan buat saat akses di link hnya misla /admin jangan ada .html di akhir untuk semuanya html, buat dengan krren dan berfungsi, dan buat fitur telepon coming soon, dan buat juga tentang orvix
+
+dan buat jika ingin membagikan link grup/saluran bisa tambahkan fitur terbaru untuk share dengan link, dan link menyesuaikan domain, dan jika di klik akan masuk ke saluran/grup yg di kirim bisa gabung dan memgikuti saluran atau grup
