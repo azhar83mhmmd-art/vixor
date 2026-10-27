@@ -1,0 +1,103 @@
+/* ORVIX identity: "Orbit & Slash". Ciri khas: potongan sudut asimetris (slash), cincin orbit, dan tanda garis miring di judul.
+   Dimuat setelah style.css; tema Neo Brutalism dan Glassmorphism disempurnakan di bagian bawah. */
+
+/* ---------- ciri khas bersama ---------- */
+.pane-head h1,.page>h1{font-family:Unbounded,Inter,system-ui,sans-serif;font-weight:800;letter-spacing:-.02em}
+.pane-head h1{font-size:1.188rem;display:flex;align-items:center;gap:9px}
+.pane-head:not(.sel-head) h1::before{content:"";width:5px;height:20px;border-radius:2px;background:linear-gradient(180deg,var(--cyan),var(--blue));transform:skewX(-20deg);flex:none}
+.tab{border-radius:14px 14px 14px 4px;transition:background .2s,border-color .2s,color .2s}
+.unread{border-radius:10px 10px 10px 3px!important}
+.fab{border-radius:20px 20px 6px 20px}
+.msg.in{border-radius:4px 16px 16px 16px}
+.msg.out{border-radius:16px 4px 16px 16px}
+:where(:root:not([data-theme=brutal])) .msg.in,:where(:root:not([data-theme=brutal])) .msg.out{border-color:transparent}
+.item{position:relative;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.item.on .av{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--cyan)}
+.btn{border-radius:12px 12px 12px 5px}
+.modal{border-radius:22px 22px 22px 8px}
+
+/* ---------- pilih chat (tekan lama) ---------- */
+.sel-head{background:var(--s2);gap:4px;padding-left:8px}.sel-head h1{font-size:1.25rem!important;flex:1;font-family:Inter,system-ui,sans-serif;font-weight:700}
+.sel-head .ibtn.on{color:var(--cyan);background:var(--s3)}
+.selecting .fab{display:none}
+.item.sel{background:rgba(45,123,255,.2)!important}
+.item.sel::after{content:"";position:absolute;left:44px;top:42px;width:20px;height:20px;border-radius:50%;border:2px solid var(--bg);background:var(--ok) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12l5 5 9-10'/></svg>") center/12px no-repeat;animation:pop .18s ease-out}
+@keyframes pop{from{transform:scale(.4);opacity:0}to{transform:none;opacity:1}}
+.pinned{color:var(--tx3);display:inline-grid;flex:none;margin-left:4px}
+.gone-p{font-style:italic;color:var(--tx3)!important}.gone-p .ic{vertical-align:-2px}
+.msg.gone{display:flex;align-items:center;gap:6px;background:transparent!important;border:1px dashed var(--bd)!important;color:var(--tx3);font-style:italic;font-size:0.875rem;box-shadow:none!important}
+.msg.gone .ic{flex:none}.msg.gone .meta{margin:0 0 0 8px;font-style:normal;white-space:nowrap}
+.blockbar{display:flex;align-items:center;gap:10px;padding:12px 14px calc(12px + var(--sb));border-top:1px solid var(--bd);background:var(--s1);font-size:0.875rem;color:var(--tx2)}
+.blockbar b{color:var(--tx)}.blockbar .ic{color:var(--danger)}
+
+/* ---------- Premium ---------- */
+.pill.prem{background:linear-gradient(110deg,#F5B301,#FF8A3D);color:#2a1700;border:0;font-weight:700}
+.prem-btn{color:#F5B301}
+.phub .modal-b{max-height:78dvh;overflow:auto}
+.phero{display:flex;align-items:center;gap:14px;padding:16px;border-radius:18px 18px 18px 6px;border:1px solid var(--bd);background:var(--s2);position:relative;overflow:hidden;margin-bottom:12px}
+.phero.active{border-color:rgba(245,179,1,.55);background:linear-gradient(135deg,rgba(245,179,1,.16),rgba(255,61,113,.1) 60%,rgba(99,102,241,.14))}
+.phero.active::after{content:"";position:absolute;top:0;bottom:0;width:36%;left:-50%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.14),transparent);transform:skewX(-22deg);animation:shine 4.5s ease-in-out infinite}
+@keyframes shine{0%,55%{left:-50%}100%{left:130%}}
+.phero-ic{width:48px;height:48px;border-radius:14px 14px 14px 4px;display:grid;place-items:center;background:var(--s3);color:var(--tx3);flex:none}
+.phero.active .phero-ic{background:linear-gradient(135deg,#F5B301,#FF8A3D);color:#2a1700}
+.phero-t{font-size:1.062rem;display:block}.phero small{color:var(--tx2)}
+.pperks{list-style:none;padding:0;display:flex;flex-direction:column;gap:2px}
+.pperks li{display:flex;gap:12px;align-items:center;padding:9px 4px;border-bottom:1px solid var(--bd)}.pperks li:last-child{border:0}
+.pperks li>span:nth-child(2){flex:1;min-width:0}.pperks b{display:block;font-size:0.9062rem}.pperks small{color:var(--tx2);font-size:0.7812rem;display:block}
+.pp-ic{width:34px;height:34px;border-radius:10px 10px 10px 3px;display:grid;place-items:center;background:var(--s3);color:var(--cyan);flex:none}
+.pp-ok{color:var(--tx3)}.pp-ok.on{color:var(--ok)}
+.pswatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:8px}
+.pswatch{display:flex;flex-direction:column;gap:6px;align-items:center;padding:8px 4px;border-radius:12px;border:1.5px solid var(--bd);font-size:0.75rem;color:var(--tx2)}
+.pswatch i{width:100%;height:26px;border-radius:9px 9px 3px 9px}
+.pswatch.on{border-color:var(--cyan);color:var(--tx);background:var(--s2)}.pswatch:disabled{opacity:.5}
+.ins{margin-top:12px;padding:14px;border-radius:16px 16px 16px 5px;background:var(--s2);border:1px solid var(--bd)}
+.ins-g{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.ins-g b{display:block;font-size:1.375rem;font-family:Unbounded,Inter,sans-serif}.ins-g small{color:var(--tx2)}
+.ins-r{display:flex;align-items:center;gap:10px;padding:4px 0;font-size:0.875rem}.ins-r .ell{width:38%}
+.ins-r i{flex:1;height:8px;border-radius:4px;background:linear-gradient(90deg,var(--cyan),var(--blue));max-width:var(--w);transform-origin:left;animation:grow .7s ease-out}
+@keyframes grow{from{transform:scaleX(0)}}
+:root[data-ring] .pav{position:relative}
+:root[data-ring] .pav::before{content:"";position:absolute;inset:-6px;border-radius:50%;background:conic-gradient(#F5B301,#ff3d71,#6366f1,#2dd4bf,#F5B301);animation:ringspin 5s linear infinite;-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 3px),#000 calc(100% - 2px));mask:radial-gradient(farthest-side,transparent calc(100% - 3px),#000 calc(100% - 2px))}
+@keyframes ringspin{to{transform:rotate(360deg)}}
+/* aksen warna (hanya Premium aktif) */
+:root[data-accent=aurora]:not([data-theme=brutal]){--blue:#6366f1;--neon:#2dd4bf;--cyan:#5eead4;--bda:#6366f1;--grad:linear-gradient(120deg,#2dd4bf,#6366f1 60%,#a855f7)}
+:root[data-accent=sunset]:not([data-theme=brutal]){--blue:#ff5a3d;--neon:#ff9a52;--cyan:#ffc36b;--bda:#ff7a45;--grad:linear-gradient(120deg,#ff7a45,#ff3d71)}
+:root[data-accent=mint]:not([data-theme=brutal]){--blue:#10b981;--neon:#34d399;--cyan:#6ee7b7;--bda:#10b981;--grad:linear-gradient(120deg,#059669,#34d399)}
+:root[data-accent=rose]:not([data-theme=brutal]){--blue:#e11d48;--neon:#fb7185;--cyan:#fda4af;--bda:#fb7185;--grad:linear-gradient(120deg,#e11d48,#fb7185)}
+:root[data-accent=gold]:not([data-theme=brutal]){--blue:#d97706;--neon:#f5b301;--cyan:#fcd34d;--bda:#f5b301;--grad:linear-gradient(120deg,#b45309,#f5b301)}
+/* gaya bubble (hanya Premium aktif) */
+[data-bubble=aurora] .msg.out{background:linear-gradient(135deg,#0f766e,#4f46e5 60%,#9333ea)!important;color:#fff}
+[data-bubble=sunset] .msg.out{background:linear-gradient(135deg,#ea580c,#e11d48)!important;color:#fff}
+[data-bubble=mint] .msg.out{background:linear-gradient(135deg,#047857,#10b981)!important;color:#fff}
+[data-bubble=rose] .msg.out{background:linear-gradient(135deg,#be123c,#fb7185)!important;color:#fff}
+[data-bubble=mono] .msg.out{background:linear-gradient(135deg,#334155,#0f172a)!important;color:#fff}
+[data-bubble=gold] .msg.out{background:linear-gradient(135deg,#b45309,#f5b301)!important;color:#1f1300}
+[data-bubble=gold] .msg.out .meta,[data-bubble=gold] .msg.out .tick{color:rgba(31,19,0,.65)}
+
+/* ---------- Glassmorphism: kaca bertingkat yang tenang ---------- */
+[data-theme=glass] .conv-pane,[data-theme=glass] .thead,[data-theme=glass] .composer,[data-theme=glass] .blockbar{background:linear-gradient(160deg,rgba(255,255,255,.07),rgba(255,255,255,.025));-webkit-backdrop-filter:blur(24px) saturate(150%);backdrop-filter:blur(24px) saturate(150%);border-color:rgba(255,255,255,.09)}
+[data-theme=glass] .item{border:1px solid transparent;transition:background .25s,border-color .25s,transform .25s}
+[data-theme=glass] .item:hover{transform:translateX(2px)}
+[data-theme=glass] .item:hover,[data-theme=glass] .item.on{background:linear-gradient(135deg,rgba(255,255,255,.10),rgba(255,255,255,.03));border-color:rgba(255,255,255,.13)}
+[data-theme=glass] .item.sel{background:linear-gradient(135deg,rgba(124,157,255,.3),rgba(123,92,255,.16))!important;border-color:rgba(160,180,255,.4)}
+[data-theme=glass] .msg.in{background:rgba(255,255,255,.075);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.1)}
+[data-theme=glass] .msg.out{background:linear-gradient(135deg,rgba(91,115,255,.82),rgba(139,92,246,.7));border:1px solid rgba(255,255,255,.2);box-shadow:0 10px 26px -14px rgba(91,115,255,.8)}
+[data-theme=glass] .tab[aria-selected=true]{background:linear-gradient(135deg,rgba(124,157,255,.28),rgba(123,92,255,.2));border-color:rgba(160,180,255,.5)}
+[data-theme=glass] .modal{background:linear-gradient(160deg,rgba(28,34,62,.82),rgba(14,18,38,.86));-webkit-backdrop-filter:blur(28px) saturate(160%);backdrop-filter:blur(28px) saturate(160%);border:1px solid rgba(255,255,255,.14);box-shadow:0 30px 80px -30px rgba(0,0,0,.8),inset 0 1px 0 rgba(255,255,255,.12)}
+[data-theme=glass] .phero,[data-theme=glass] .ins,[data-theme=glass] .pswatch.on{background:rgba(255,255,255,.06)}
+
+/* ---------- Neo Brutalism: tegas tapi hangat ---------- */
+[data-theme=brutal] .item{border:2px solid transparent;border-radius:12px;transition:transform .12s,box-shadow .12s}
+[data-theme=brutal] .item:hover{background:var(--s2)}
+[data-theme=brutal] .item.on,[data-theme=brutal] .item.sel{background:var(--s1)!important;border-color:var(--ink);box-shadow:4px 4px 0 var(--ink)}
+[data-theme=brutal] .item.sel{box-shadow:4px 4px 0 var(--acc)}
+[data-theme=brutal] .item.sel::after{border-color:var(--ink);background-color:var(--acc);background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12l5 5 9-10'/></svg>")}
+[data-theme=brutal] .msg{border:2px solid var(--ink);box-shadow:3px 3px 0 var(--ink)}
+[data-theme=brutal] .msg.in{background:var(--s1);color:var(--tx)}
+[data-theme=brutal] .msg.out{background:var(--blue);color:#111}
+[data-theme=brutal] .msg.out .meta,[data-theme=brutal] .msg.out .tick{color:rgba(17,17,17,.62)}
+[data-theme=brutal] .msg.out .tick.read{color:#0B2A8A}
+[data-theme=brutal] .sel-head{background:var(--acc);color:#111;border-bottom:2px solid var(--ink)}[data-theme=brutal] .sel-head .ibtn{color:#111}
+[data-theme=brutal] .blockbar,[data-theme=brutal] .phero,[data-theme=brutal] .ins{border:2px solid var(--ink);box-shadow:4px 4px 0 var(--ink)}
+[data-theme=brutal] .pswatch{border:2px solid var(--ink);border-radius:10px}[data-theme=brutal] .pswatch.on{box-shadow:3px 3px 0 var(--acc);background:var(--s1)}
+[data-theme=brutal] .pane-head:not(.sel-head) h1::before{background:var(--ink)}
+@media (prefers-reduced-motion:reduce){.phero.active::after,:root[data-ring] .pav::before,.ins-r i{animation:none}}
