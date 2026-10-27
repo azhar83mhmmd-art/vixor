@@ -1,0 +1,69 @@
+/* ORVIX landing: identitas "Orbit & Slash". Selalu gelap, independen dari tema aplikasi. */
+.land{--l-ink:#04060D;--l-blue:#2D7BFF;--l-cyan:#38D4FF;--l-amber:#FFB547;background:radial-gradient(120% 70% at 50% -10%,#0E1A3D 0%,var(--l-ink) 62%);color:#F4F7FC;color-scheme:dark}
+.land>.l-grid,.land>.l-slash{position:absolute;max-width:none;width:auto;pointer-events:none}
+.land>.l-grid{inset:0;background-image:linear-gradient(rgba(56,212,255,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(56,212,255,.06) 1px,transparent 1px);background-size:44px 44px;-webkit-mask-image:radial-gradient(70% 55% at 50% 22%,#000,transparent);mask-image:radial-gradient(70% 55% at 50% 22%,#000,transparent)}
+.land>.l-slash{left:-20%;right:-20%;top:0;height:200px;background:linear-gradient(100deg,transparent 40%,rgba(56,212,255,.22) 50%,transparent 60%);transform:translateX(-120%) skewX(-24deg);opacity:0}
+.orbit{position:relative;width:min(74vw,300px)!important;aspect-ratio:1;margin:6px auto 0;display:grid;place-items:center}
+.orbit .hero-logo{position:relative;width:62%;margin:0;animation:none;z-index:2;filter:drop-shadow(0 0 30px rgba(45,123,255,.55))}
+.orbit .o{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(56,212,255,.28)}
+.orbit .o2{inset:9%;border-style:dashed;border-color:rgba(45,123,255,.38)}
+.orbit .o3{inset:-9%;border-color:rgba(255,181,71,.16)}
+.orbit .sat{position:absolute;top:50%;left:50%;width:9px;height:9px;margin:-4.5px;border-radius:50%;background:var(--l-cyan);box-shadow:0 0 14px var(--l-cyan)}
+.orbit .s2{background:var(--l-amber);box-shadow:0 0 14px var(--l-amber);width:7px;height:7px;margin:-3.5px}
+.orbit .s3{background:#fff;width:5px;height:5px;margin:-2.5px;box-shadow:0 0 10px #fff}
+.land .tag{font-family:Unbounded,Inter,system-ui,sans-serif;font-weight:600;font-size:max(0.6875rem,11px);letter-spacing:.3em;color:var(--l-cyan);min-height:18px;margin-top:14px;display:flex;justify-content:center;align-items:center;gap:3px}
+.cur{width:2px;height:15px;background:var(--l-amber);display:inline-block}
+.cur.idle{animation:curb 1s steps(1) infinite}
+.land h1.kin{font-family:Unbounded,Inter,system-ui,sans-serif;font-weight:800;font-size:clamp(24px,7vw,34px);line-height:1.18;letter-spacing:-.02em;margin:12px 0 12px}
+.land h1 .brand{background:linear-gradient(100deg,#fff 10%,var(--l-cyan) 60%,var(--l-blue));-webkit-background-clip:text;background-clip:text;color:transparent}
+.land .lead{color:#A9B6CC}
+.rot{display:flex;justify-content:center;align-items:baseline;gap:8px;margin:-10px 0 20px;color:#A9B6CC;font-size:0.9375rem}
+.rwrap{display:inline-block;min-width:8.5em;text-align:left;overflow:hidden;height:1.5em;vertical-align:bottom}
+.rwrap b{display:inline-block;color:#fff;font-weight:700;border-bottom:2px solid var(--l-amber);transition:transform .28s cubic-bezier(.5,0,.2,1),opacity .28s}
+.rwrap b.out{transform:translateY(-110%);opacity:0}.rwrap b.in{animation:rwin .32s cubic-bezier(.2,.8,.2,1)}
+.land .btn.primary{position:relative;overflow:hidden;border-radius:14px 14px 14px 4px;background:linear-gradient(110deg,#1F63FF,#1FB6FF);letter-spacing:.04em}
+.land .btn.primary::before{content:"";position:absolute;top:0;bottom:0;width:40%;left:-60%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.38),transparent);transform:skewX(-22deg)}
+.land .btn:not(.primary){border-radius:14px 14px 4px 14px;background:rgba(255,255,255,.04);border-color:rgba(56,212,255,.3);color:var(--l-cyan)}
+.land .cta{margin-bottom:6px}
+.demo{margin:22px auto 6px;border:1px solid rgba(56,212,255,.2);background:linear-gradient(160deg,rgba(255,255,255,.05),rgba(255,255,255,.015));border-radius:20px 20px 20px 6px;overflow:hidden;max-width:330px!important}
+.demo-h{display:flex;align-items:center;gap:9px;padding:9px 12px;border-bottom:1px solid rgba(255,255,255,.07);font-size:0.875rem}
+.demo-h small{margin-left:auto;color:#5BE3A8;font-size:max(0.6875rem,11px)}.demo-h small::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:#5BE3A8;margin-right:5px}
+.demo-av{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,var(--l-blue),var(--l-cyan));font-weight:700;font-size:0.75rem}
+.demo-b{height:190px;padding:10px;display:flex;flex-direction:column;gap:6px;overflow:hidden;transition:opacity .4s}.demo-b.fade{opacity:0}
+.db{max-width:80%;padding:6px 10px;border-radius:12px;font-size:0.8438rem;opacity:0;transform:translateY(8px) scale(.96);transition:opacity .3s,transform .3s}
+.db.show{opacity:1;transform:none}
+.db small{display:block;text-align:right;font-size:max(0.625rem,10px);opacity:.6;margin-top:1px}
+.db.in{align-self:flex-start;background:#17213A;border-radius:12px 12px 12px 3px}
+.db.out{align-self:flex-end;background:linear-gradient(135deg,#1C4FD0,#1590D8);border-radius:12px 12px 3px 12px}
+.db .dt{letter-spacing:-2px}.db .dt.rd{color:#8FF2FF}
+.db.out.img{padding:4px}.db .ph{display:block;width:120px;height:62px;border-radius:9px;background:linear-gradient(135deg,#F6A04D,#E4527A 55%,#6B5CE7)}
+.db.gone{background:transparent;border:1px dashed rgba(255,255,255,.2);color:#8A97AE;font-style:italic;font-size:0.7812rem}
+.db .ban{display:inline-block;width:11px;height:11px;border:1.5px solid currentColor;border-radius:50%;vertical-align:-1px;margin-right:3px;background:linear-gradient(135deg,transparent 44%,currentColor 46%,currentColor 54%,transparent 56%)}
+.db.typing{display:flex;gap:4px;padding:10px 12px}.db.typing i{width:6px;height:6px;border-radius:50%;background:#7C8BA8}
+.land .feats{margin-top:20px}
+.land .feat{background:linear-gradient(160deg,rgba(255,255,255,.05),rgba(255,255,255,.015));border-color:rgba(56,212,255,.16);border-radius:14px 14px 14px 4px}
+@keyframes curb{50%{opacity:0}}
+@keyframes rwin{from{transform:translateY(110%);opacity:0}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:no-preference){
+  .land>.l-slash{animation:sweep 1.5s .15s cubic-bezier(.5,0,.2,1) 1 both}
+  .orbit .hero-logo{animation:logoin 1s .2s cubic-bezier(.2,.9,.2,1) both,fl 6s 1.2s ease-in-out infinite}
+  .orbit .o1{animation:ringin .9s .1s ease-out both,spin 40s linear infinite}
+  .orbit .o2{animation:ringin .9s .25s ease-out both,spin 28s linear infinite reverse}
+  .orbit .o3{animation:ringin .9s .4s ease-out both,spin 60s linear infinite}
+  .orbit .sat{animation:orb 9s linear infinite;--r:150px}.orbit .s2{animation-duration:14s;animation-direction:reverse;--r:134px}.orbit .s3{animation-duration:22s;--r:168px}
+  .land h1 .w{display:inline-block;animation:wordin .7s calc(.9s + var(--i)*.12s) cubic-bezier(.2,.8,.2,1) both}
+  .land .lead,.land .rot,.land .cta,.land .demo{animation:fadeup .7s both}.land .lead{animation-delay:1.5s}.land .rot{animation-delay:1.7s}.land .cta{animation-delay:1.9s}.land .demo{animation-delay:2.2s}
+  .land .feat{animation:fadeup .6s both}.land .feat:nth-child(1){animation-delay:2.4s}.land .feat:nth-child(2){animation-delay:2.5s}.land .feat:nth-child(3){animation-delay:2.6s}.land .feat:nth-child(4){animation-delay:2.7s}
+  .land .btn.primary::before{animation:shine 3.4s 3s ease-in-out infinite}
+  .db.typing i{animation:dotb 1s infinite}.db.typing i:nth-child(2){animation-delay:.15s}.db.typing i:nth-child(3){animation-delay:.3s}
+}
+@keyframes sweep{0%{opacity:0;transform:translateX(-120%) skewX(-24deg)}15%{opacity:1}100%{opacity:0;transform:translateX(120%) skewX(-24deg)}}
+@keyframes logoin{from{opacity:0;transform:scale(.6) rotate(-14deg);filter:blur(10px)}to{opacity:1;transform:none}}
+@keyframes ringin{from{opacity:0;transform:scale(.7)}to{opacity:1}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes orb{from{transform:rotate(0) translateX(var(--r)) rotate(0)}to{transform:rotate(360deg) translateX(var(--r)) rotate(-360deg)}}
+@keyframes wordin{from{opacity:0;transform:translateY(.6em) skewX(-10deg);filter:blur(8px)}to{opacity:1;transform:none;filter:none}}
+@keyframes fadeup{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes shine{0%,60%{left:-60%}100%{left:130%}}
+@keyframes dotb{0%,60%,100%{transform:translateY(0);opacity:.5}30%{transform:translateY(-4px);opacity:1}}
+@media (max-width:380px){.orbit .sat{--r:118px!important}.orbit .s2{--r:104px!important}.orbit .s3{--r:130px!important}}
