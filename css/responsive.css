@@ -1,0 +1,79 @@
+/* ORVIX responsif: dimuat paling akhir di semua halaman.
+   Menjaga layout tidak pernah lebih lebar dari layar dan membuat teks mengikuti ukuran layar. */
+
+/* ---------- teks fluid: 1rem = 15px (HP kecil) sampai 17px (layar lebar) ---------- */
+html{font-size:clamp(15px,14.2px + .25vw,17px);-webkit-text-size-adjust:100%;text-size-adjust:100%}
+h1,h2,h3,p,.msg,.sub,.p,.t{overflow-wrap:break-word}
+img,video,canvas,svg{max-width:100%}
+/* input minimal 16px agar iOS tidak memperbesar halaman saat diketik */
+.inp,input,select,textarea{font-size:max(1rem,16px)}
+.pane-head h1{font-size:clamp(1.05rem,3.6vw + .4rem,1.45rem)}
+.page>h1{font-size:clamp(1.35rem,4vw + .5rem,1.9rem)}
+
+/* ---------- layout chat: kolom grid tidak boleh melebar mengikuti isi ---------- */
+html,body{max-width:100%;overflow-x:hidden}
+.app{width:100%;max-width:100vw}
+.main{min-width:0;max-width:100%;overflow-x:hidden}
+.chat-layout{grid-template-columns:minmax(0,1fr);width:100%;max-width:100%}
+.conv-pane,.thread-pane{min-width:0;max-width:100%;overflow:hidden}
+@media(min-width:900px){
+  .chat-layout{grid-template-columns:minmax(300px,clamp(300px,32vw,400px)) minmax(0,1fr)}
+}
+.thead{min-width:0;max-width:100%;gap:clamp(4px,1.5vw,10px)}
+.thead>*{min-width:0}
+.thead>.ibtn,.thead>.back{flex:none}
+.thead #hProfile{flex:1 1 0;min-width:0;overflow:hidden;max-width:100%}
+.thead #hProfile>.grow{display:block;min-width:0;overflow:hidden}
+.thead .sub{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:max(.75rem,12px)}
+.msgs{min-width:0;max-width:100%;overflow-x:hidden;overscroll-behavior:contain;padding-inline:clamp(10px,3vw,20px)}
+.msg{max-width:min(84%,34rem);min-width:0}
+.msg .mm{max-width:100%}
+.msg img,.msg video{max-width:100%;height:auto}
+.composer{min-width:0;max-width:100%;gap:clamp(6px,2vw,10px);padding-inline:clamp(8px,3vw,14px)}
+.composer textarea{min-width:0}
+.composer .ibtn,.send{flex:none}
+.list{min-width:0;overflow-x:hidden}
+.item{min-width:0}
+.item>.grow{min-width:0}
+.item .t,.item .row{min-width:0}
+.pane-head{min-width:0;padding-inline:clamp(10px,3vw,16px);gap:clamp(2px,1vw,8px)}
+.pane-head .ibtn{flex:none}
+.pane-head h1{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tabs,.searchbar{max-width:100%}
+.alert,.blockbar{min-width:0;overflow-wrap:anywhere}
+.modal{max-width:100%}
+.modal-b{min-width:0;overflow-wrap:anywhere}
+#toasts{width:min(92vw,420px)}
+
+/* HP kecil */
+@media(max-width:360px){
+  .ibtn{width:36px;height:36px}
+  .msg{max-width:88%}
+  .pane-head{gap:0}
+}
+/* HP landscape / layar pendek: ruang pesan harus tetap terlihat */
+@media(max-height:480px) and (orientation:landscape){
+  .thead{padding-block:4px}.composer{padding-block:6px}.composer textarea{min-height:38px}
+  .pane-head{padding-block:6px}
+}
+/* tablet portrait */
+@media(min-width:600px) and (max-width:899px){
+  .msgs{padding-inline:clamp(16px,5vw,40px)}
+}
+
+/* ---------- pilih pesan dengan tekan lama (sama seperti memilih chat) ---------- */
+.msgs .msg[data-m]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;position:relative}
+.msg.sel{outline:2px solid var(--cyan);outline-offset:2px}
+.msg.sel::after{content:"";position:absolute;top:-9px;width:22px;height:22px;border-radius:50%;border:2px solid var(--bg2);background:var(--ok) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12l5 5 9-10'/></svg>") center/12px no-repeat;animation:pop .18s ease-out}
+.msg.in.sel::after{left:-9px}.msg.out.sel::after{right:-9px}
+.thread-pane.msel .msgs .msg[data-m]{cursor:pointer}
+.msel-head{display:flex;align-items:center;gap:2px;padding:calc(10px + var(--st)) 8px 10px 8px;border-bottom:1px solid var(--bd);background:var(--s2);min-width:0}
+.msel-head h1{flex:1;min-width:0;font-size:clamp(1rem,3vw + .5rem,1.3rem)!important;font-family:Inter,system-ui,sans-serif;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msel-head h1::before{display:none!important}
+.msel-head .ibtn{flex:none}
+.msel-head .ibtn[aria-disabled=true]{opacity:.4}
+.msel-head .ibtn.danger{color:var(--danger)}
+[data-theme=brutal] .msel-head{background:var(--acc);color:#111;border-bottom:3px solid var(--ink)}
+[data-theme=brutal] .msel-head .ibtn{color:#111}[data-theme=brutal] .msel-head .ibtn.danger{color:#b00020}
+[data-theme=brutal] .msg.sel{outline-color:var(--ink);box-shadow:4px 4px 0 var(--acc)}
+[data-theme=glass] .msel-head{background:rgba(10,14,28,.78);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
