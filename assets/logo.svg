@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="ORVIX">
+<defs><linearGradient id="s" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8FAFF"/><stop offset="1" stop-color="#9AA8BC"/></linearGradient>
+<linearGradient id="b" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#1769FF"/><stop offset=".6" stop-color="#00A8FF"/><stop offset="1" stop-color="#32D9FF"/></linearGradient></defs>
+<path d="M60 12a48 48 0 1 0 46 62l-15-6A32 32 0 1 1 74 22z" fill="url(#s)"/>
+<path d="M38 60l16 17 46-52-40 41-8-8z" fill="url(#b)"/>
+<path d="M104 30C84 40 70 60 52 90c26-22 44-38 52-60z" fill="url(#b)" opacity=".85"/></svg>
