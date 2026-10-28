@@ -4,15 +4,30 @@
 // Secrets: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT (mailto:...), PUSH_WEBHOOK_SECRET.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import webpush from "npm:web-push@3.6.7";
+import { createECDH } from "node:crypto";
 import { buildCall, buildFriend, buildMessage, buildTest, isGone, Kind, Payload, WEBPUSH, wants } from "../_shared/pushpayload.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false, autoRefreshToken: false } });
-// VAPID_SUBJECT wajib berawalan mailto: atau https:// — bila user mengisi email polos, otomatis dibetulkan agar fungsi tidak crash saat boot.
+const VAPID_PUB = (Deno.env.get("VAPID_PUBLIC_KEY") ?? "").trim();
+const VAPID_PRIV = (Deno.env.get("VAPID_PRIVATE_KEY") ?? "").trim();
+// VAPID_SUBJECT wajib berawalan mailto: atau https://; email polos dibetulkan otomatis.
 const rawSubject = (Deno.env.get("VAPID_SUBJECT") ?? "").trim();
 const subject = /^(mailto:|https:\/\/)/i.test(rawSubject) ? rawSubject : "mailto:" + (rawSubject || "admin@orvix.app");
-webpush.setVapidDetails(subject, (Deno.env.get("VAPID_PUBLIC_KEY") ?? "").trim(), (Deno.env.get("VAPID_PRIVATE_KEY") ?? "").trim());
 const SECRET = (Deno.env.get("PUSH_WEBHOOK_SECRET") ?? "").trim();
-const ok = (b: unknown = { ok: true }) => new Response(JSON.stringify(b), { headers: { "Content-Type": "application/json" } });
+
+// Inisialisasi VAPID TIDAK di tingkat modul: kunci salah tidak lagi membuat fungsi crash saat boot, tetapi dilaporkan jelas.
+let vapidError: string | null = null;
+try { webpush.setVapidDetails(subject, VAPID_PUB, VAPID_PRIV); } catch (e) { vapidError = (e as Error).message; }
+// Apakah VAPID_PRIVATE_KEY benar-benar pasangan VAPID_PUBLIC_KEY? (penyebab umum push diam-diam gagal: 403 dari push service)
+function vapidMatches(): boolean {
+  try {
+    const b = (x: string) => Uint8Array.from(atob(x.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (x.length % 4)) % 4)), (c) => c.charCodeAt(0));
+    const e = createECDH("prime256v1"); e.setPrivateKey(b(VAPID_PRIV));
+    return e.getPublicKey().toString("base64url") === VAPID_PUB.replace(/=+$/, "");
+  } catch { return false; }
+}
+const json = (b: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(b), { status, headers: { "Content-Type": "application/json", ...extra } });
 
 const eq = (a: string, b: string) => { if (a.length !== b.length || !a.length) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; };
 
@@ -51,12 +66,17 @@ async function plan(ev: Record<string, unknown>): Promise<Target[]> {
       db.from("conversation_members").select("user_id").eq("conversation_id", m.conversation_id),
     ]);
     if (!cv) return [];
-    const isGroup = cv.type === "group";
+    const isGroup = cv.type === "group", isChannel = cv.type === "channel";
     const ids = await eligible((mem ?? []).map((r) => r.user_id as string).filter((u) => u !== m.sender_id), m.sender_id);   // tidak pernah ke pengirim
-    const prefs = await prefsFor(ids), sender = await name(m.sender_id), kind: Kind = isGroup ? "group" : "message";
-    return ids.filter((u) => wants(prefs.get(u), kind)).map((u) => ({
+    if (!ids.length) return [];
+    const prefs = await prefsFor(ids), sender = await name(m.sender_id), kind: Kind = isChannel ? "channel" : isGroup ? "group" : "message";
+    // bisukan & kunci chat (kolom ada setelah sql-parts/17a; bila belum, dilewati)
+    const cp = new Map<string, { muted_until: string | null; locked_at: string | null }>();
+    { const { data } = await db.from("orvix_conv_prefs").select("user_id,muted_until,locked_at").eq("conversation_id", m.conversation_id).in("user_id", ids);
+      (data ?? []).forEach((r) => cp.set(r.user_id as string, r as never)); }
+    return ids.filter((u) => wants(prefs.get(u), kind)).filter((u) => { const x = cp.get(u); return !(x?.muted_until && new Date(x.muted_until) > new Date()); }).map((u) => ({
       user_id: u, opt: WEBPUSH.message,
-      payload: buildMessage({ senderName: sender, isGroup, groupTitle: cv.title, convId: m.conversation_id, m, preview: prefs.get(u)?.preview !== false }),
+      payload: buildMessage({ senderName: sender, isGroup, channel: isChannel, locked: !!cp.get(u)?.locked_at, groupTitle: cv.title, convId: m.conversation_id, m, preview: prefs.get(u)?.preview !== false }),
     }));
   }
   if (type === "friend") {
@@ -82,10 +102,11 @@ async function plan(ev: Record<string, unknown>): Promise<Target[]> {
 }
 
 async function deliver(targets: Target[]) {
-  if (!targets.length) return { sent: 0, removed: 0, failed: 0 };
+  if (!targets.length) return { sent: 0, removed: 0, failed: 0, targets: 0, reason: "tidak ada penerima yang memenuhi syarat (diblokir, dibisukan, preferensi mati, atau pengirim sendiri)" };
   const { data: subs } = await db.from("push_subscriptions").select("id,user_id,endpoint,p256dh,auth").in("user_id", [...new Set(targets.map((t) => t.user_id))]);
   const byUser = new Map<string, Target>(targets.map((t) => [t.user_id, t]));
-  let sent = 0, removed = 0, failed = 0; const list = subs ?? [];
+  let sent = 0, removed = 0, failed = 0; const list = subs ?? []; const codes: number[] = [];
+  if (!list.length) return { sent: 0, removed: 0, failed: 0, targets: targets.length, reason: "penerima belum punya langganan push (aktifkan notifikasi di Profil pada perangkat penerima)" };
   for (let i = 0; i < list.length; i += 20) {
     await Promise.all(list.slice(i, i + 20).map(async (s) => {
       const t = byUser.get(s.user_id as string); if (!t) return;
@@ -93,20 +114,28 @@ async function deliver(targets: Target[]) {
         await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(t.payload), { TTL: t.opt.TTL, urgency: t.opt.urgency as "high" | "normal" });
         sent++; await db.from("push_subscriptions").update({ last_ok_at: new Date().toISOString(), failures: 0 }).eq("id", s.id);
       } catch (e) {
-        const code = (e as { statusCode?: number }).statusCode ?? 0;
+        const code = (e as { statusCode?: number }).statusCode ?? 0; codes.push(code);
         if (isGone(code)) { removed++; await db.from("push_subscriptions").delete().eq("id", s.id); }          // langganan kedaluwarsa: bersihkan
         else { failed++; console.error("[push-send] gagal kirim", code, (e as Error).message); const { data: r } = await db.from("push_subscriptions").select("failures").eq("id", s.id).maybeSingle(); const n = (r?.failures ?? 0) + 1;
           if (n >= 8) await db.from("push_subscriptions").delete().eq("id", s.id); else await db.from("push_subscriptions").update({ failures: n }).eq("id", s.id); }
       }
     }));
   }
-  return { sent, removed, failed };
+  const hint = codes.some((c) => c === 401 || c === 403) ? "push service menolak kunci VAPID: VAPID_PRIVATE_KEY tidak cocok dengan VAPID_PUBLIC_KEY di js/config.js (buat ulang langganan setelah memperbaiki)" : undefined;
+  return { sent, removed, failed, targets: targets.length, codes, hint };
 }
 
 Deno.serve(async (req) => {
-  if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
-  if (!eq(req.headers.get("x-push-secret") ?? "", SECRET)) return new Response("Unauthorized", { status: 401 });
-  try { const ev = await req.json(); return ok(await deliver(await plan(ev))); }
-  catch (e) { console.error("[push-send]", e); return ok({ ok: false });   // 200 agar pg_net tidak mengulang; galat ada di log fungsi
+  const cors = corsHeaders(req);
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+  // Pemeriksaan kesehatan publik (tanpa rahasia): dipakai tombol "Diagnosa" di Profil.
+  if (req.method === "GET") {
+    return json({ ok: !vapidError && !!SECRET && !!VAPID_PUB && !!VAPID_PRIV, vapid_public: VAPID_PUB, vapid_valid: !vapidError, vapid_error: vapidError, vapid_match: !!VAPID_PRIV && vapidMatches(), secret_set: !!SECRET, subject }, 200, { ...cors, "Access-Control-Allow-Origin": "*" });
   }
+  if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405, headers: cors });
+  if (!SECRET) return json({ ok: false, error: "PUSH_WEBHOOK_SECRET belum diisi di secrets Edge Function" }, 500, cors);
+  if (!eq(req.headers.get("x-push-secret") ?? "", SECRET)) return json({ ok: false, error: "x-push-secret tidak cocok dengan PUSH_WEBHOOK_SECRET. Jalankan ulang select public.push_configure(url, secret) dengan secret yang sama." }, 401, cors);
+  if (vapidError) return json({ ok: false, error: "Kunci VAPID tidak valid: " + vapidError }, 500, cors);
+  try { const r = await deliver(await plan(await req.json())); console.log("[push-send]", JSON.stringify(r)); return json({ ok: true, ...r }, 200, cors); }
+  catch (e) { console.error("[push-send]", e); return json({ ok: false, error: (e as Error).message }, 500, cors); }
 });
