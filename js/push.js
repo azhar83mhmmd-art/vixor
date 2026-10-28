@@ -76,3 +76,77 @@ export const DEFAULT_PREFS = { messages: true, groups: true, friends: true, call
 export async function getPrefs() { const { data, error } = await sb.rpc('push_get_prefs'); if (error) throw error; return { ...DEFAULT_PREFS, ...(data || {}) }; }
 export async function setPrefs(p) { const { error } = await sb.rpc('push_set_prefs', { p }); if (error) throw error; }
 export async function sendTest() { const { error } = await sb.rpc('push_test'); if (error) throw error; }
+
+/* ---------- Diagnosa end-to-end ----------
+   Menjalankan semua mata rantai notifikasi dan melaporkan yang putus, lengkap dengan cara memperbaikinya.
+   Tiap langkah: { id, ok: true|false|null(peringatan), title, detail, fix } */
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+async function health() {
+  const url = `${SUPABASE_URL}/functions/v1/push-send`;
+  try {
+    const r = await fetch(url, { cache: 'no-store' });   // GET sederhana: tanpa preflight, fungsi memang tanpa JWT
+    if (r.status === 401 || r.status === 403) return { gateway: r.status };
+    if (r.status === 404) return { missing: true };
+    return { ...(await r.json()), status: r.status };
+  } catch (e) {
+    // Bedakan "CORS memblokir" dari "tidak ada koneksi": no-cors tetap berhasil bila server terjangkau.
+    try { await fetch(url, { mode: 'no-cors', cache: 'no-store' }); return { cors: true, origin: location.origin }; }
+    catch { return { net: String((e && e.message) || e) }; }
+  }
+}
+export async function diagnose(uid, onStep = () => {}, { sendTestPush = true } = {}) {
+  const out = []; const add = (s) => { out.push(s); onStep(s, out); return s; };
+  // 1) browser
+  add({ id: 'browser', ok: pushSupported(), title: 'Browser mendukung push', detail: pushSupported() ? 'Service worker, Push API, dan Notification tersedia.' : 'Browser/konteks ini tidak mendukung push (butuh HTTPS; di iPhone/iPad ORVIX harus dipasang ke Layar Utama).', fix: 'Buka ORVIX lewat HTTPS di Chrome/Edge/Firefox/Safari terbaru.' });
+  if (!pushSupported()) return out;
+  add({ id: 'config', ok: pushConfigured(), title: 'Kunci VAPID publik di js/config.js', detail: pushConfigured() ? 'Terisi.' : 'VAPID_PUBLIC_KEY kosong.', fix: 'Jalankan node scripts/gen-vapid.mjs dan tempel VAPID_PUBLIC_KEY ke js/config.js.' });
+  const perm = Notification.permission;
+  add({ id: 'perm', ok: perm === 'granted', title: 'Izin notifikasi browser', detail: perm === 'granted' ? 'Diizinkan.' : perm === 'denied' ? 'Diblokir di browser.' : 'Belum diberikan. Aktifkan sakelar Notifikasi dulu.', fix: 'Ikon gembok di address bar, Izin situs, Notifikasi, Izinkan. Lalu muat ulang.' });
+  // 2) service worker
+  let reg = null; try { reg = await navigator.serviceWorker.getRegistration('/'); } catch { /* abaikan */ }
+  const swUrl = reg && ((reg.active || reg.waiting || reg.installing) || {}).scriptURL;
+  add({ id: 'sw', ok: !!(reg && reg.active), title: 'Service worker aktif', detail: reg && reg.active ? 'Aktif (' + new URL(swUrl).pathname + ').' : 'Belum terdaftar/aktif.', fix: 'Muat ulang halaman. Pastikan /sw.js dapat dibuka dan vercel.json ikut ter-deploy.' });
+  // 3) langganan di perangkat
+  let sub = null; try { sub = reg && (await reg.pushManager.getSubscription()); } catch { /* abaikan */ }
+  let keyOk = null; if (sub && pushConfigured()) keyOk = same(sub.options && sub.options.applicationServerKey, u8(VAPID_PUBLIC_KEY));
+  add({ id: 'sub', ok: !!sub && keyOk !== false, title: 'Langganan push di perangkat ini', detail: !sub ? 'Belum ada langganan. Aktifkan sakelar Notifikasi.' : keyOk === false ? 'Langganan dibuat dengan kunci VAPID lain.' : 'Ada.', fix: 'Matikan lalu nyalakan lagi sakelar Notifikasi untuk membuat langganan baru.' });
+  // 4) Edge Function
+  const h = await health();
+  if (h.gateway) add({ id: 'fn', ok: false, title: 'Edge Function push-send', detail: `Gateway menolak (HTTP ${h.gateway}). Verifikasi JWT masih aktif.`, fix: 'Deploy ulang: supabase functions deploy push-send --no-verify-jwt (file supabase/config.toml sudah menyetel ini).' });
+  else if (h.missing) add({ id: 'fn', ok: false, title: 'Edge Function push-send', detail: 'Tidak ditemukan (404): belum di-deploy.', fix: 'supabase functions deploy push-send --no-verify-jwt' });
+  else if (h.cors) add({ id: 'fn', ok: null, title: 'Edge Function push-send', detail: 'Fungsi terjangkau, tetapi CORS memblokir origin ' + h.origin + '.', fix: 'Hanya pengecekan dari browser yang terblokir; pengiriman asli lewat server tidak terpengaruh. Untuk menghilangkannya: deploy ulang push-send, atau tambahkan origin ini ke secret ALLOWED_ORIGIN.' });
+  else if (h.net) add({ id: 'fn', ok: false, title: 'Edge Function push-send', detail: 'Tidak terjangkau dari browser: ' + h.net, fix: 'Periksa koneksi, SUPABASE_URL di config.js, dan CORS (secret ALLOWED_ORIGIN).' });
+  else {
+    add({ id: 'fn', ok: h.status === 200, title: 'Edge Function push-send', detail: h.status === 200 ? 'Berjalan.' : 'Merespons HTTP ' + h.status + (h.error ? ': ' + h.error : ''), fix: 'Lihat log fungsi: Dashboard, Edge Functions, push-send, Logs.' });
+    add({ id: 'secrets', ok: !!h.secret_set && !!h.vapid_valid, title: 'Secrets Edge Function', detail: !h.secret_set ? 'PUSH_WEBHOOK_SECRET belum diisi.' : !h.vapid_valid ? 'Kunci VAPID server tidak valid: ' + (h.vapid_error || '') : 'PUSH_WEBHOOK_SECRET dan kunci VAPID terisi.', fix: 'supabase secrets set VAPID_PUBLIC_KEY=... VAPID_PRIVATE_KEY=... VAPID_SUBJECT=mailto:emailmu@domain.com PUSH_WEBHOOK_SECRET=... lalu deploy ulang.' });
+    const same = h.vapid_public === VAPID_PUBLIC_KEY;
+    add({ id: 'vapid', ok: same && !!h.vapid_match, title: 'Pasangan kunci VAPID', detail: !same ? 'VAPID_PUBLIC_KEY di server berbeda dari js/config.js.' : !h.vapid_match ? 'VAPID_PRIVATE_KEY di server BUKAN pasangan VAPID_PUBLIC_KEY. Push service akan menolak (403).' : 'Kunci publik di config.js, kunci publik server, dan kunci privat server saling cocok.', fix: 'Pakai ketiga nilai dari SATU hasil `node scripts/gen-vapid.mjs`. Setelah mengganti, matikan lalu nyalakan lagi Notifikasi di tiap perangkat.' });
+  }
+  // 5) database
+  let d = null, dErr = null; { const r = await sb.rpc('push_diag'); d = r.data; dErr = r.error; }
+  if (dErr) add({ id: 'db', ok: false, title: 'Database', detail: /could not find the function|schema cache|42883/i.test(errMsg(dErr)) ? 'Fungsi push_diag belum ada.' : errMsg(dErr), fix: 'Jalankan sql-parts/15a-push.sql lalu sql-parts/17a-fitur-chat.sql di SQL Editor.' });
+  else {
+    add({ id: 'dbcfg', ok: !!(d.has_url && d.has_secret), title: 'push_configure sudah dijalankan', detail: d.has_url && d.has_secret ? 'URL fungsi: ' + d.url_host : 'URL/secret belum disimpan.', fix: "select public.push_configure('https://<ref>.supabase.co/functions/v1/push-send', '<PUSH_WEBHOOK_SECRET>');" });
+    add({ id: 'pgnet', ok: !!d.has_pg_net, title: 'Ekstensi pg_net', detail: d.has_pg_net ? 'Aktif.' : 'Belum aktif: database tidak bisa memanggil Edge Function.', fix: 'Dashboard, Database, Extensions, aktifkan pg_net.' });
+    add({ id: 'trg', ok: !!d.trigger_message, title: 'Pemicu pesan baru', detail: d.trigger_message ? 'trg_push_message terpasang.' : 'Pemicu tidak ada.', fix: 'Jalankan ulang sql-parts/15a-push.sql.' });
+    add({ id: 'dbsub', ok: d.my_subscriptions > 0, title: 'Langganan tersimpan di server', detail: d.my_subscriptions > 0 ? d.my_subscriptions + ' perangkat terdaftar untuk akunmu.' : 'Server belum menyimpan langganan akunmu.', fix: 'Matikan lalu nyalakan lagi sakelar Notifikasi.' });
+  }
+  if (!sendTestPush) return out;
+  const prevAt = d && d.responses && d.responses[0] ? d.responses[0].created : null;
+  const hardFail = out.some((s) => s.ok === false && ['browser', 'config', 'perm', 'sw', 'sub', 'dbcfg', 'pgnet'].includes(s.id));
+  if (hardFail) { add({ id: 'e2e', ok: false, title: 'Uji kirim end-to-end', detail: 'Dilewati: perbaiki langkah merah di atas dulu.', fix: '' }); return out; }
+  const t = await sb.rpc('push_test');
+  if (t.error) { add({ id: 'e2e', ok: false, title: 'Uji kirim end-to-end', detail: errMsg(t.error), fix: '' }); return out; }
+  // 6) tunggu respons HTTP dari Edge Function yang dicatat pg_net
+  let resp = null;
+  for (let i = 0; i < 8 && !resp; i++) { await wait(1500); const r = await sb.rpc('push_diag'); const x = r.data && r.data.responses && r.data.responses[0]; if (x && (!prevAt || x.created !== prevAt)) resp = x; }
+  if (!resp) add({ id: 'e2e', ok: false, title: 'Uji kirim end-to-end', detail: 'Database tidak mencatat respons dari Edge Function dalam 12 detik. Permintaan tidak sampai atau terlalu lambat.', fix: 'Cek URL di push_configure (harus persis URL fungsi), pg_net aktif, dan log Edge Function.' });
+  else {
+    let body = null; try { body = JSON.parse(resp.body); } catch { /* bukan JSON */ }
+    const code = resp.status_code;
+    if (code === 200 && body && body.sent > 0) add({ id: 'e2e', ok: true, title: 'Uji kirim end-to-end', detail: 'Server berhasil mengirim ' + body.sent + ' notifikasi. Jika tidak terlihat, periksa mode Jangan Ganggu/Fokus dan penghemat baterai perangkat.', fix: '' });
+    else add({ id: 'e2e', ok: false, title: 'Uji kirim end-to-end', detail: `Edge Function membalas HTTP ${code || '(tanpa respons)'}${body && body.error ? ': ' + body.error : body && body.hint ? ': ' + body.hint : body && body.reason ? ': ' + body.reason : resp.error ? ': ' + resp.error : resp.body ? ': ' + resp.body.slice(0, 160) : ''}${body && body.codes && body.codes.length ? ' (kode push service: ' + body.codes.join(', ') + ')' : ''}`, fix: code === 401 ? 'Secret berbeda. Jalankan ulang push_configure dengan PUSH_WEBHOOK_SECRET yang sama dengan di secrets.' : code === 404 ? 'URL salah / fungsi belum di-deploy.' : code >= 500 ? 'Lihat log Edge Function.' : '' });
+  }
+  return out;
+}
