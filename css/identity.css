@@ -101,3 +101,13 @@
 [data-theme=brutal] .pswatch{border:2px solid var(--ink);border-radius:10px}[data-theme=brutal] .pswatch.on{box-shadow:3px 3px 0 var(--acc);background:var(--s1)}
 [data-theme=brutal] .pane-head:not(.sel-head) h1::before{background:var(--ink)}
 @media (prefers-reduced-motion:reduce){.phero.active::after,:root[data-ring] .pav::before,.ins-r i{animation:none}}
+
+/* Diagnosa notifikasi */
+.diag-out{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+.diag-row{display:flex;gap:10px;align-items:flex-start;padding:9px 10px;border-radius:12px;border:1px solid var(--bd);background:var(--s1)}
+.diag-row small{display:block;color:var(--tx2);font-size:.78rem;line-height:1.4;word-break:break-word}
+.diag-row .diag-fix{color:var(--cyan);margin-top:3px}
+.diag-dot{flex:none;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;margin-top:1px}
+.diag-row.ok .diag-dot{background:rgba(53,212,154,.16);color:var(--ok)}
+.diag-row.bad{border-color:rgba(255,77,100,.5)}.diag-row.bad .diag-dot{background:rgba(255,77,100,.16);color:var(--danger)}
+.diag-row.warn .diag-dot{background:rgba(255,200,60,.16);color:#ffc83c}
