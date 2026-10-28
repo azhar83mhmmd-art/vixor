@@ -12,12 +12,16 @@ const safeId = (s: string) => String(s).replace(/[^0-9a-zA-Z-]/g, "").slice(0, 4
 
 export function messageBody(m: { content?: string | null; media_type?: string | null }, preview: boolean): string {
   if (!preview) return "Pesan baru";
+  if (m.media_type === "audio") return "🎤 Pesan suara";
   const text = clip(m.content, 110);
   if (text) return text;
   return m.media_type === "video" ? "Mengirim video" : m.media_type === "image" ? "Mengirim foto" : "Pesan baru";
 }
-export function buildMessage(o: { senderName: string; isGroup: boolean; groupTitle?: string | null; convId: string; m: { content?: string | null; media_type?: string | null }; preview: boolean }): Payload {
+export function buildMessage(o: { senderName: string; isGroup: boolean; groupTitle?: string | null; convId: string; m: { content?: string | null; media_type?: string | null }; preview: boolean; channel?: boolean; locked?: boolean }): Payload {
   const sender = clip(o.senderName || "Seseorang", 40), body = messageBody(o.m, o.preview);
+  // Chat terkunci: isi dan nama disembunyikan, ketuk hanya membuka ORVIX
+  if (o.locked) return { type: "message", tag: "msg-" + safeId(o.convId), url: "/chat", title: "ORVIX", body: "Pesan baru" };
+  if (o.channel) return { type: "message", tag: "msg-" + safeId(o.convId), url: "/updates?ch=" + safeId(o.convId), title: clip(o.groupTitle || "Saluran", 50), body: o.preview ? body : "Kiriman baru" };
   return {
     type: "message", tag: "msg-" + safeId(o.convId), url: "/chat?c=" + safeId(o.convId),
     title: o.isGroup ? clip(o.groupTitle || "Grup", 50) : sender,
@@ -32,8 +36,8 @@ export const buildCall = (o: { name: string; kind: string; isGroup: boolean; gro
 });
 export const buildTest = (): Payload => ({ type: "test", tag: "test", url: "/profile", title: "Notifikasi ORVIX aktif", body: "Notifikasi uji berhasil diterima di perangkat ini." });
 
-export type Kind = "message" | "group" | "friend" | "call";
-export const wants = (p: Prefs | null | undefined, k: Kind): boolean => { const x = prefsOf(p); return k === "message" ? x.messages : k === "group" ? x.groups : k === "friend" ? x.friends : x.calls; };
+export type Kind = "message" | "group" | "friend" | "call" | "channel";
+export const wants = (p: Prefs | null | undefined, k: Kind): boolean => { const x = prefsOf(p); return k === "message" ? x.messages : k === "group" ? x.groups : k === "friend" ? x.friends : k === "channel" ? x.groups : x.calls; };
 // Status HTTP dari push service yang berarti langganan sudah tidak berlaku (hapus dari database)
 export const isGone = (status: number): boolean => status === 404 || status === 410;
 export const WEBPUSH = { message: { TTL: 86400, urgency: "normal" }, friend: { TTL: 259200, urgency: "normal" }, call: { TTL: 30, urgency: "high" }, test: { TTL: 120, urgency: "high" } } as const;
