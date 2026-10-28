@@ -3,7 +3,7 @@ import { sb, requireAuth, cacheMe, logout, fetchProfiles, purgeAvatarFiles, purg
 import { cropImage } from './cropper.js';
 import { openPremiumHub } from './premium.js';
 import { canInstall, promptInstall, onInstallChange, isStandalone, isIOS, wasInstalled } from './pwa.js';
-import { pushStatus, enablePush, disablePush, getPrefs, setPrefs, sendTest } from './push.js';
+import { pushStatus, enablePush, disablePush, getPrefs, setPrefs, sendTest, diagnose } from './push.js';
 import { $, esc, icon, avatar, nameWithBadge, toast, setBusy, openModal, confirmDialog, copyText, validateImage, extOf, mountShell, THEMES, applyTheme, currentTheme, relTime, wallpaperModal, isPremium } from './utils.js';
 
 const { profile: me } = await requireAuth({ shell: '/profile' });
@@ -83,7 +83,21 @@ async function paintPrefs() {
   const items = [['messages', 'Pesan pribadi', 'Pesan baru dari chat pribadi'], ['groups', 'Pesan grup', 'Pesan baru dari grup'], ['friends', 'Permintaan pertemanan', 'Saat ada yang mengajakmu berteman'], ['calls', 'Panggilan masuk', 'Tergantung dukungan browser dan perangkat; dering di dalam ORVIX tetap berjalan'], ['preview', 'Tampilkan isi pesan', 'Matikan agar notifikasi hanya menulis "Pesan baru"']];
   box.innerHTML = items.map(([k, t, d]) => `<div class="setrow" style="margin-left:14px">${icon('check', 20)}<span class="grow"><b>${t}</b><small>${d}</small></span>${sw('pf_' + k, pr[k], t)}</div>`).join('') + '<div style="margin:8px 16px"><button class="btn" id="btnPushTest">Kirim notifikasi uji</button><p class="dim" id="pushTestMsg" style="margin-top:6px"></p></div>';
   items.forEach(([k]) => { const b = $('#pf_' + k); b.onclick = gd(async () => { const v = b.getAttribute('aria-checked') !== 'true'; b.disabled = true; try { await setPrefs({ [k]: v }); b.setAttribute('aria-checked', String(v)); } finally { b.disabled = false; } }); });
-  $('#btnPushTest').onclick = async (e) => { const b = e.currentTarget; setBusy(b, true, 'Mengirim'); try { await sendTest(); $('#pushTestMsg').textContent = 'Uji dikirim lewat server. Jika tidak muncul dalam beberapa detik, periksa konfigurasi di README bagian 13.'; } catch (x) { $('#pushTestMsg').textContent = errMsg(x); } setBusy(b, false); };
+  $('#btnPushTest').onclick = async (e) => { const b = e.currentTarget; setBusy(b, true, 'Mengirim'); try { await sendTest(); $('#pushTestMsg').textContent = 'Uji dikirim lewat server. Jika tidak muncul dalam beberapa detik, periksa izin notifikasi, mode Jangan Ganggu, dan penghemat baterai, atau hubungi admin.'; } catch (x) { $('#pushTestMsg').textContent = errMsg(x); } setBusy(b, false); };
+}
+
+// Diagnosa end-to-end: daftar langkah hijau/merah dengan petunjuk perbaikan.
+function paintDiag() {
+  const box = $('#diagBox'); if (!box) return;
+  if (me.role !== 'admin') { box.innerHTML = ''; return; }   // Diagnosa hanya untuk admin (RPC push_diag juga menolak non-admin)
+  box.innerHTML = `<div style="margin:8px 16px 4px"><button class="btn block" id="btnDiag">${icon('shield', 18)} Diagnosa notifikasi</button><div id="diagOut" class="diag-out" aria-live="polite"></div></div>`;
+  $('#btnDiag').onclick = async (e) => {
+    const b = e.currentTarget, out = $('#diagOut'); setBusy(b, true, 'Memeriksa'); out.innerHTML = '';
+    const row = (s) => `<div class="diag-row ${s.ok === true ? 'ok' : s.ok === false ? 'bad' : 'warn'}"><span class="diag-dot">${s.ok === true ? icon('check', 14) : icon('x', 14)}</span><span class="grow"><b>${esc(s.title)}</b><small>${esc(s.detail)}</small>${s.ok === false && s.fix ? `<small class="diag-fix">Perbaikan: ${esc(s.fix)}</small>` : ''}</span></div>`;
+    try { await diagnose(me.id, (s, all) => { out.innerHTML = all.map(row).join(''); }); } catch (x) { out.innerHTML += `<p class="err">${esc(errMsg(x))}</p>`; }
+    const bad = out.querySelectorAll('.diag-row.bad').length; out.insertAdjacentHTML('beforeend', `<p class="dim" style="margin-top:8px">${bad ? bad + ' masalah ditemukan. Perbaiki dari yang paling atas.' : 'Semua pemeriksaan lolos.'}</p>`);
+    setBusy(b, false);
+  };
 }
 
 function render() {
@@ -100,7 +114,7 @@ function render() {
   <div class="setrow">${icon('globe', 24)}<span class="grow"><b>Profil publik</b><small>Siapa pun bisa melihat foto dan statusmu</small></span>${sw('swPub', me.profile_public, 'Profil publik')}</div>
   <p class="sec">Aplikasi dan notifikasi</p>
   <div id="installBox"></div>
-  <div id="pushBox"></div>
+  <div id="pushBox"></div><div id="diagBox"></div>
   <p class="sec">Privasi</p>
   <button class="setrow" id="rowStory">${icon('updates', 24)}<span class="grow"><b>Siapa yang bisa melihat story-ku</b><small>${VIS[me.story_visibility]} (default untuk story baru)</small></span>${icon('chev', 18)}</button>
   <button class="setrow" id="rowMsg">${icon('msg', 24)}<span class="grow"><b>Siapa yang dapat mengirim pesan kepada saya?</b><small>${MSGP[me.who_can_message || 'friends'][0]}</small></span>${icon('chev', 18)}</button>
@@ -155,7 +169,7 @@ function wire() {
   $('#editP').onclick = $('#editP2').onclick = editProfile;
   const toggle = (id, key) => { $(id).onclick = guard(async (e) => { const b = e.currentTarget, v = b.getAttribute('aria-checked') !== 'true'; b.disabled = true; try { await upd({ [key]: v }); render(); } finally { b.disabled = false; } }); };
   toggle('#swPub', 'profile_public'); toggle('#swSeen', 'show_last_seen');
-  paintInstall(); paintPush();
+  paintInstall(); paintPush(); paintDiag();
   $('#rowStory').onclick = () => {
     const m = openModal({ title: 'Visibilitas story', sheet: true, html: `<div class="col">${Object.entries(VIS).map(([k, v]) => `<button class="btn ${k === me.story_visibility ? 'primary' : ''}" data-v="${k}">${v}</button>`).join('')}</div>` });
     m.el.onclick = guard(async (e) => { const v = e.target.closest('[data-v]')?.dataset.v; if (!v) return; await upd({ story_visibility: v }); m.close(); render(); });
