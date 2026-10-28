@@ -436,11 +436,18 @@ function sendMsg() {
   const tmp = { id: 'tmp-' + ++seq, conversation_id: activeId, sender_id: me.id, content: text, created_at: new Date().toISOString(), _st: 'sending', reply_to: replyTo ? replyTo.id : null };
   clearReply(); stopTypingNow(); msgs.push(tmp); render('bottom'); insertMsg(tmp);
 }
+const offQ = new Set();   // pesan teks yang menunggu koneksi
+window.addEventListener('online', () => { [...offQ].forEach((t) => { if (msgs.includes(t) || t.conversation_id !== activeId) { offQ.delete(t); insertMsg(t); } else offQ.delete(t); }); });
 async function insertMsg(tmp) {
   const row = { conversation_id: tmp.conversation_id, sender_id: me.id, content: tmp.content }; if (tmp.reply_to && !String(tmp.reply_to).startsWith('tmp-')) row.reply_to = tmp.reply_to;
   const { data, error } = await sb.from('messages').insert(row).select().single();
   if (tmp.conversation_id !== activeId) { if (!error) refreshList(); return; }
-  if (error) { tmp._st = 'failed'; render('auto'); return toast(sendErr(error), 'error'); }
+  if (error) {
+    // Tanpa internet: tampil jam (menunggu) dan dikirim otomatis saat online lagi, seperti WhatsApp. Galat lain tetap "gagal".
+    if (!navigator.onLine || /failed to fetch|networkerror|network request failed|load failed/i.test(String(error.message || ''))) { tmp._st = 'sending'; offQ.add(tmp); render('auto'); return; }
+    tmp._st = 'failed'; render('auto'); return toast(sendErr(error), 'error');
+  }
+  offQ.delete(tmp);
   const cc = curConv(); if (cc?.conv_type === 'direct' && cc.other_id && !savedOnce.has(cc.other_id)) { savedOnce.add(cc.other_id); saveContact(cc.other_id, 'chat'); }
   msgs = msgs.filter((m) => m !== tmp); if (!msgs.some((m) => m.id === data.id)) msgs.push(data);
   msgs.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)); render('bottom'); refreshList();
