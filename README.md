@@ -126,3 +126,34 @@ Jalankan `14a-panggilan.sql` di SQL Editor (idempotent), lalu deploy ulang front
 **Belum dikerjakan dari daftar fitur Premium** (batch berikutnya): tema dan wallpaper, kustomisasi bubble lanjutan, bingkai avatar dan gaya bio, reaksi dan efek animasi, story Premium, terjemahan pesan (butuh API penerjemah), musik profil, username eksklusif, kontrol tanda baca, alat grup Premium.
 
 **Checklist uji**: (1) akun gratis: tombol jam tidak muncul, menu menampilkan lencana Premium, RPC ditolak; (2) akun Premium: jadwalkan 2 menit lagi, tutup aplikasi, pesan masuk di chat; (3) ubah/batalkan sebelum waktunya; (4) blokir lawan lalu tunggu jadwal: status Gagal; (5) ketik draft, pindah chat, kembali, draft pulih dan di perangkat lain juga; (6) cari `50%` dan `hari_ini`: dicocokkan apa adanya.
+
+
+## 17. Perbaikan notifikasi + fitur chat baru (sql-parts/17a-fitur-chat.sql)
+
+**Urutan**: jalankan `sql-parts/17a-fitur-chat.sql` di SQL Editor (idempotent), deploy ulang frontend, lalu **deploy ulang Edge Function**: `supabase functions deploy push-send` (file `supabase/config.toml` sudah mematikan verifikasi JWT; `--no-verify-jwt` tidak lagi wajib). Tutup tab lama setelah deploy.
+
+### Notifikasi tidak muncul? Pakai Diagnosa
+Profil, bagian Notifikasi, tombol **Diagnosa notifikasi**. Tombol ini memeriksa tiap mata rantai (browser, izin, service worker, langganan, Edge Function, secrets, pasangan kunci VAPID, `push_configure`, pg_net, pemicu, lalu mengirim uji end-to-end dan membaca respons HTTP dari Edge Function) dan menulis perbaikannya. Perbaikan di kode:
+- Edge Function tidak lagi menelan galat: membalas 401/500 dengan alasan, dan `GET` publik mengecek VAPID (kunci privat harus pasangan kunci publik).
+- `push_configure`/`push_post` memangkas spasi pada secret (penyebab 401 diam-diam) dan batas pg_net naik 3 detik menjadi 15 detik.
+- Notifikasi dalam-aplikasi tidak lagi mati total saat push dianggap aktif; keduanya memakai `tag` sama sehingga tidak dobel.
+- Saluran: judul notifikasi memakai nama saluran. Chat dibisukan tidak mengirim notifikasi. Chat terkunci hanya menulis "Pesan baru".
+
+### Fitur chat baru
+Balas pesan (ketuk pesan, atau geser ke kanan), kutipan yang bisa diketuk untuk loncat ke pesan asli; **pesan suara** (rekam, jeda, gelombang suara, putar 1×/1.5×/2×, geser untuk mencari); reaksi emoji; teruskan pesan (teks dan media, hingga 5 chat); pesan berbintang; **arsipkan chat** (muncul lagi saat ada pesan baru); **kunci chat** dengan PIN; bisukan (8 jam/1 minggu/selamanya); tandai belum dibaca; filter "Belum dibaca"; indikator sedang mengetik; pemilih emoji; tombol ke pesan terbaru dengan penghitung.
+
+**Catatan jujur**
+- Kunci chat adalah pengaman layar per perangkat (PIN di-hash PBKDF2 dan hanya disimpan di perangkat ini; lupa PIN diatur ulang dengan kata sandi akun). Ini bukan enkripsi: pesan tetap terbaca dari perangkat lain yang login ke akun yang sama.
+- Pesan suara butuh HTTPS dan izin mikrofon. Maksimal 10 menit per pesan.
+- Indikator mengetik memakai Realtime Broadcast publik. Bila "Allow public access" dimatikan di pengaturan Realtime, indikator diam saja; fitur lain tidak terpengaruh.
+- Bila 17a belum dijalankan, aplikasi tetap berjalan; fitur baru menampilkan pesan agar menjalankan SQL tersebut.
+
+
+## 18. Perbaikan notifikasi: pg_net, pemicu, CORS lokal (sql-parts/18a-perbaiki-push.sql)
+
+Gejala Diagnosa: "Tidak terjangkau dari browser: Failed to fetch", "Ekstensi pg_net belum aktif", "Pemicu pesan baru tidak ada".
+1. Jalankan `sql-parts/18a-perbaiki-push.sql` di SQL Editor (kecil, sekali tempel). Hasil akhir harus `pg_net = true`, `jumlah_pemicu >= 2`. Bila pg_net masih gagal: Dashboard, Database, Extensions, aktifkan pg_net, lalu jalankan ulang file ini.
+2. Deploy ulang fungsi: `supabase functions deploy push-send` (CORS kini otomatis mengizinkan localhost/LAN dan GET kesehatan terbuka).
+3. Deploy ulang frontend, muat ulang Profil, tekan Diagnosa. Bila CORS masih memblokir, Diagnosa kini menyebut origin yang ditolak.
+
+**Diagnosa khusus admin**: tombol "Diagnosa notifikasi" hanya tampil untuk akun role admin, dan RPC `push_diag` menolak non-admin ("Khusus admin."). Jalankan `sql-parts/18b-diagnosa-admin.sql` sekali.
