@@ -31,6 +31,10 @@ const json = (b: unknown, status = 200, extra: Record<string, string> = {}) => n
 
 const eq = (a: string, b: string) => { if (a.length !== b.length || !a.length) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; };
 
+// Penerima mengirim kabar "diterima" langsung dari service worker saat push tiba (RPC push_ack, lihat sql-parts/18c). Kunci anon memang publik.
+const ANON = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+const ACK = (conv: string) => (ANON ? { u: Deno.env.get("SUPABASE_URL")! + "/rest/v1/rpc/push_ack", k: ANON, c: String(conv) } : undefined);
+
 type Target = { user_id: string; payload: Payload; opt: { TTL: number; urgency: string } };
 
 // penerima yang tidak memblokir / diblokir pengirim, tidak ditangguhkan
@@ -76,7 +80,7 @@ async function plan(ev: Record<string, unknown>): Promise<Target[]> {
       (data ?? []).forEach((r) => cp.set(r.user_id as string, r as never)); }
     return ids.filter((u) => wants(prefs.get(u), kind)).filter((u) => { const x = cp.get(u); return !(x?.muted_until && new Date(x.muted_until) > new Date()); }).map((u) => ({
       user_id: u, opt: WEBPUSH.message,
-      payload: buildMessage({ senderName: sender, isGroup, channel: isChannel, locked: !!cp.get(u)?.locked_at, groupTitle: cv.title, convId: m.conversation_id, m, preview: prefs.get(u)?.preview !== false }),
+      payload: { ...buildMessage({ senderName: sender, isGroup, channel: isChannel, locked: !!cp.get(u)?.locked_at, groupTitle: cv.title, convId: m.conversation_id, m, preview: prefs.get(u)?.preview !== false }), ack: ACK(m.conversation_id) },
     }));
   }
   if (type === "friend") {
