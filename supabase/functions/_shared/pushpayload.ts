@@ -40,4 +40,4 @@ export type Kind = "message" | "group" | "friend" | "call" | "channel";
 export const wants = (p: Prefs | null | undefined, k: Kind): boolean => { const x = prefsOf(p); return k === "message" ? x.messages : k === "group" ? x.groups : k === "friend" ? x.friends : k === "channel" ? x.groups : x.calls; };
 // Status HTTP dari push service yang berarti langganan sudah tidak berlaku (hapus dari database)
 export const isGone = (status: number): boolean => status === 404 || status === 410;
-export const WEBPUSH = { message: { TTL: 86400, urgency: "normal" }, friend: { TTL: 259200, urgency: "normal" }, call: { TTL: 30, urgency: "high" }, test: { TTL: 120, urgency: "high" } } as const;
+export const WEBPUSH = { message: { TTL: 86400, urgency: "high" }, friend: { TTL: 259200, urgency: "high" }, call: { TTL: 30, urgency: "high" }, test: { TTL: 120, urgency: "high" } } as const;
