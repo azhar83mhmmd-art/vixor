@@ -1,0 +1,102 @@
+/* ORVIX chat: balas, reaksi, pesan suara, arsip, kunci, emoji. Hanya memakai variabel tema, jadi ikut semua tema. */
+.thread-pane{position:relative}
+.tabs{scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}
+
+/* daftar chat */
+.item.folder{opacity:.95}
+.folder-av{width:48px;height:48px;background:var(--s2);color:var(--cyan)}
+.lv-h{display:flex;align-items:center;gap:6px;padding:4px 4px 10px;position:sticky;top:0;z-index:2;background:var(--bg)}
+.lv-h b{font-size:1.05rem}.lv-h small{font-size:.75rem;line-height:1.3;font-weight:400}
+.unread.muted{background:var(--tx3);color:var(--bg)}
+.unread.dot{min-width:12px;width:12px;height:12px;padding:0}
+.item .when.hot{color:var(--cyan);font-weight:600}
+.sel-head .ibtn.on{color:var(--cyan);background:var(--s2)}
+
+/* gelembung */
+.msg{position:relative;transition:transform .12s ease,box-shadow .2s}
+.msg.has-rx{margin-bottom:12px}
+.msg .fwd-l{display:flex;align-items:center;gap:5px;font-size:.72rem;font-style:italic;color:rgba(244,247,252,.6);margin-bottom:2px}
+.msg.in .fwd-l{color:var(--tx3)}
+.msg.swp::before{content:"";position:absolute;left:-44px;top:50%;width:30px;height:30px;margin-top:-15px;border-radius:50%;background:var(--s3) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2332D9FF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 7 4 12l5 5M4 12h10a6 6 0 0 1 6 6v1'/%3E%3C/svg%3E") center/18px no-repeat}
+.msg.flash{animation:flash 1.8s ease}
+@keyframes flash{0%,35%{box-shadow:0 0 0 3px var(--cyan)}100%{box-shadow:0 0 0 0 transparent}}
+.m-star{display:inline-flex;vertical-align:-1px;margin-right:3px;color:#ffc83c}.m-star .ic{fill:#ffc83c}
+
+/* kutipan balasan */
+.rq{display:flex;gap:8px;align-items:stretch;margin:-2px -4px 6px;padding:6px 10px 6px 0;border-radius:10px;background:rgba(0,0,0,.22);cursor:pointer;min-width:150px;overflow:hidden;white-space:normal}
+.rq::before{content:"";width:4px;flex:none;border-radius:4px;background:var(--cyan);margin-right:2px}
+.rq.mine::before{background:#9fe3c0}
+.rq b{font-size:.78rem;color:var(--cyan);display:block}.rq.mine b{color:#9fe3c0}
+.rq small{display:block;font-size:.8rem;opacity:.85;max-width:260px}
+.rq.off{cursor:default;opacity:.75}.rq.off::before{background:var(--tx3)}.rq.off b{color:var(--tx2)}
+.msg.in .rq{background:rgba(255,255,255,.06)}
+[data-theme=brutal] .rq{background:var(--bg2);border:2px solid var(--bd)}
+
+/* reaksi */
+.rxs{position:absolute;right:10px;bottom:-14px;display:flex;gap:3px}
+.rx{display:inline-flex;align-items:center;gap:3px;min-height:24px;padding:0 7px;border-radius:12px;background:var(--s2);border:1px solid var(--bd);font-size:.9rem;line-height:1;box-shadow:0 2px 6px rgba(0,0,0,.35)}
+.rx i{font-style:normal;font-size:.72rem;color:var(--tx2)}
+.rx.mine{border-color:var(--cyan);background:var(--s3)}
+.rx .emoji{width:1.05em;height:1.05em}
+.msgmenu .qr{display:flex;justify-content:space-between;gap:4px;padding:8px;margin-bottom:12px;border-radius:30px;background:var(--s1);border:1px solid var(--bd)}
+.msgmenu .qr button{flex:1;height:44px;border-radius:50%;font-size:1.5rem;display:grid;place-items:center;transition:transform .12s,background .15s}
+.msgmenu .qr button:hover{transform:scale(1.2);background:var(--s2)}
+.msgmenu .qr button.on{background:var(--s3);box-shadow:inset 0 0 0 2px var(--cyan)}
+.msgmenu .qr .emoji{width:1.5rem;height:1.5rem}
+.rxrow{width:100%;padding:6px;border-radius:12px}.rxrow:hover{background:var(--s2)}
+
+/* pesan suara */
+.msg.vn-msg{min-width:min(78vw,280px)}
+.vn{display:flex;align-items:center;gap:10px;padding:2px 0;white-space:normal}
+.vn-play{flex:none;width:42px;height:42px;border-radius:50%;background:var(--grad);display:grid;place-items:center;color:#fff;position:relative}
+.vn-play::before{content:"";width:0;height:0;margin-left:4px;border-left:13px solid #fff;border-top:8px solid transparent;border-bottom:8px solid transparent}
+.vn.playing .vn-play::before{width:12px;height:14px;margin:0;border:0;background:linear-gradient(90deg,#fff 0 4px,transparent 4px 8px,#fff 8px 12px)}
+.vn-bars{flex:1;display:flex;align-items:center;gap:2px;height:34px;min-width:90px;cursor:pointer;touch-action:pan-y}
+.vn-bars i{flex:1;min-width:2px;border-radius:2px;background:rgba(255,255,255,.32);transition:background .1s}
+.msg.in .vn-bars i{background:var(--tx3)}
+.vn-bars i.on{background:#7FF0FF}.msg.in .vn-bars i.on{background:var(--cyan)}
+.vn-side{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex:none;min-width:44px}
+.vn-time{font-size:.72rem;font-variant-numeric:tabular-nums;opacity:.8;white-space:nowrap}
+.vn-spd{font-size:.7rem;font-weight:700;padding:1px 7px;border-radius:10px;background:rgba(0,0,0,.28);color:inherit;min-width:36px}
+.vn:not(.playing) .vn-spd{opacity:.55}
+[data-theme=brutal] .vn-bars i{background:var(--tx3)}
+
+/* kolom ketik */
+.replybar{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--s1);border-top:1px solid var(--bd)}
+.replybar .rb-bar{width:4px;align-self:stretch;border-radius:4px;background:var(--cyan)}
+.replybar b{font-size:.8rem;color:var(--cyan);display:block}.replybar small{display:block;color:var(--tx2);font-size:.8rem}
+.composer{position:relative;align-items:center}
+.composer .send.mic{background:var(--grad)}
+.composer .recbar{display:none}
+.composer.recording > :not(.recbar){display:none!important}
+.composer.recording .recbar{display:flex;align-items:center;gap:10px;flex:1;min-width:0}
+.rec-dot{width:11px;height:11px;border-radius:50%;background:var(--danger);animation:recp 1s infinite;flex:none}
+.composer.paused .rec-dot{animation:none;opacity:.4}
+@keyframes recp{50%{opacity:.25;transform:scale(.8)}}
+.rec-t{font-variant-numeric:tabular-nums;font-weight:600;min-width:42px}
+.rec-lv{flex:1;display:flex;align-items:center;gap:3px;height:34px;min-width:0;overflow:hidden}
+.rec-lv i{flex:1;min-width:3px;max-width:6px;height:12%;border-radius:3px;background:var(--cyan);transition:height .08s}
+.thead .sub.typing{color:var(--cyan)}
+.tobottom{position:absolute;right:14px;bottom:calc(76px + var(--sb));width:42px;height:42px;border-radius:50%;background:var(--s2);border:1px solid var(--bd);color:var(--tx);display:grid;place-items:center;box-shadow:0 6px 18px rgba(0,0,0,.4);z-index:5}
+.tobottom .tb-n{position:absolute;top:-8px;right:-4px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:var(--grad);color:#fff;font-size:.72rem;font-weight:700;display:grid;place-items:center}
+
+/* emoji */
+.emopop{position:absolute;left:8px;right:8px;bottom:calc(68px + var(--sb));max-width:380px;z-index:20;background:var(--s2);border:1px solid var(--bd);border-radius:18px;box-shadow:0 14px 40px rgba(0,0,0,.5);overflow:hidden}
+.emo-tabs{display:flex;border-bottom:1px solid var(--bd);background:var(--s1)}
+.emo-tabs button{flex:1;height:42px;font-size:1.2rem;opacity:.6}.emo-tabs button.on{opacity:1;box-shadow:inset 0 -3px 0 var(--cyan)}
+.emo-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:2px;padding:8px;max-height:240px;overflow-y:auto}
+.emo-grid button{height:38px;font-size:1.35rem;border-radius:10px;display:grid;place-items:center}.emo-grid button:hover{background:var(--s3)}
+.emo-grid .emoji,.emo-tabs .emoji{width:1.35rem;height:1.35rem}
+
+/* PIN */
+.pin-dots{display:flex;justify-content:center;gap:12px;margin:6px 0 14px}
+.pin-dots i{width:14px;height:14px;border-radius:50%;border:2px solid var(--bd);transition:all .12s}
+.pin-dots i.on{background:var(--cyan);border-color:var(--cyan);transform:scale(1.1)}
+.pin-in{text-align:center;font-size:1.4rem;letter-spacing:.5em;text-indent:.5em}
+
+/* teruskan, berbintang */
+.fwd-row{padding:8px 6px;border-radius:12px;cursor:pointer}.fwd-row:hover{background:var(--s2)}
+.fwd-row input{width:20px;height:20px;accent-color:var(--blue)}
+.star-row{text-align:left;width:100%;display:flex;flex-direction:column;gap:4px}
+.star-row .star-t{color:var(--tx2);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+@media (prefers-reduced-motion:reduce){.msg,.rec-dot,.msg.flash{animation:none;transition:none}}
