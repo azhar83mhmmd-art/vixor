@@ -4,7 +4,7 @@ import { esc, icon } from './utils.js';
 
 const IEXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }, VEXT = { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' };
 export const ACCEPT = Object.keys({ ...IEXT, ...VEXT }).join(','), MAX_IMG = 5 * 1048576, MAX_VID = 25 * 1048576;
-export const isPlaceholder = (m) => m.media_path && (m.content === '📷 Foto' || m.content === '🎥 Video');
+export const isPlaceholder = (m) => m.media_path && (m.content === '📷 Foto' || m.content === '🎥 Video' || m.content === '🎤 Pesan suara');
 
 async function shrink(file) {
   const bmp = await createImageBitmap(file).catch(() => null);
@@ -32,9 +32,14 @@ async function prepare(file) {
 }
 
 // Kirim pesan teks atau media ke percakapan (grup/chat pribadi/saluran). Melempar Error bila gagal.
-export async function sendMessage({ conv, me, text = '', file = null, onProgress }) {
+export async function sendMessage({ conv, me, text = '', file = null, onProgress, replyTo = null, audio = null }) {
   let row = { conversation_id: conv, sender_id: me, content: text.trim(), message_type: 'text' };
-  if (file) {
+  if (replyTo && !String(replyTo).startsWith('tmp-')) row.reply_to = replyTo;
+  if (audio) {   // pesan suara: { blob, ext, mime, duration_ms, wave }
+    const path = `${conv}/${me}/${crypto.randomUUID()}.${audio.ext}`, blob = new Blob([audio.blob], { type: audio.mime });
+    const up = await uploadWithProgress('chat-media', path, blob, onProgress); if (up.error) throw up.error;
+    row = { ...row, content: '🎤 Pesan suara', message_type: 'audio', media_type: 'audio', media_path: path, duration_ms: Math.max(500, Math.min(600000, Math.round(audio.duration_ms))), wave: audio.wave || null };
+  } else if (file) {
     const p = await prepare(file), path = `${conv}/${me}/${crypto.randomUUID()}.${p.ext}`;
     const up = await uploadWithProgress('chat-media', path, p.blob, onProgress); if (up.error) throw up.error;
     row = { ...row, content: row.content || (p.type === 'image' ? '📷 Foto' : '🎥 Video'), message_type: p.type, media_type: p.type, media_path: path };
@@ -52,12 +57,18 @@ async function sign(paths) {
   const { data } = await sb.storage.from('chat-media').createSignedUrls(need, 3600);
   (data || []).forEach((x) => x.signedUrl && urls.set(x.path, { url: x.signedUrl, at: Date.now() }));
 }
-export const mediaHTML = (m) => (m.media_path ? `<div class="mm" data-mp="${esc(m.media_path)}" data-mt="${m.media_type}"><span class="sk"></span></div>` : '');
+const fmtDur = (ms) => { const t = Math.round((ms || 0) / 1000); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
+export const mediaHTML = (m) => {
+  if (!m.media_path) return '';
+  if (m.media_type === 'audio') return `<div class="vn" data-mp="${esc(m.media_path)}" data-mt="audio" data-dur="${m.duration_ms || 0}" data-wave="${esc(m.wave || '')}" data-id="${esc(m.id)}"><button type="button" class="vn-play" data-vn-play aria-label="Putar pesan suara"></button><span class="vn-bars" data-vn-bars></span><span class="vn-side"><span class="vn-time">${fmtDur(m.duration_ms)}</span><button type="button" class="vn-spd" data-vn-spd aria-label="Kecepatan putar">1×</button></span></div>`;
+  return `<div class="mm" data-mp="${esc(m.media_path)}" data-mt="${m.media_type}"><span class="sk"></span></div>`;
+};
 export async function hydrate(root) {
-  const els = [...root.querySelectorAll('.mm[data-mp]:not([data-ok])')]; if (!els.length) return;
+  const els = [...root.querySelectorAll('.mm[data-mp]:not([data-ok]), .vn[data-mp]:not([data-ok])')]; if (!els.length) return;
   await sign(els.map((e) => e.dataset.mp));
   els.forEach((e) => {
     const u = urls.get(e.dataset.mp)?.url; if (!u) return; e.dataset.ok = 1;
+    if (e.classList.contains('vn')) { e.dataset.src = u; return; }
     e.innerHTML = e.dataset.mt === 'video' ? `<video src="${esc(u)}" controls playsinline preload="metadata"></video>` : `<img src="${esc(u)}" alt="Foto" loading="lazy">`;
   });
 }
@@ -65,3 +76,7 @@ export function lightbox(src) {
   const d = document.createElement('div'); d.className = 'lbx'; d.innerHTML = `<button class="ibtn" aria-label="Tutup">${icon('x', 22)}</button><img src="${esc(src)}" alt="">`;
   d.onclick = () => d.remove(); document.body.append(d);
 }
+
+// URL bertanda tangan untuk satu berkas (dipakai teruskan/unduh)
+export async function signedUrl(path) { await sign([path]); return urls.get(path)?.url || null; }
+export { fmtDur };
