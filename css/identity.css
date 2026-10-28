@@ -95,7 +95,7 @@
 [data-theme=brutal] .msg.in{background:var(--s1);color:var(--tx)}
 [data-theme=brutal] .msg.out{background:var(--blue);color:#111}
 [data-theme=brutal] .msg.out .meta,[data-theme=brutal] .msg.out .tick{color:rgba(17,17,17,.62)}
-[data-theme=brutal] .msg.out .tick.read{color:#0B2A8A}
+[data-theme=brutal] .msg.out .tick.read{color:#0B6FB0}
 [data-theme=brutal] .sel-head{background:var(--acc);color:#111;border-bottom:2px solid var(--ink)}[data-theme=brutal] .sel-head .ibtn{color:#111}
 [data-theme=brutal] .blockbar,[data-theme=brutal] .phero,[data-theme=brutal] .ins{border:2px solid var(--ink);box-shadow:4px 4px 0 var(--ink)}
 [data-theme=brutal] .pswatch{border:2px solid var(--ink);border-radius:10px}[data-theme=brutal] .pswatch.on{box-shadow:3px 3px 0 var(--acc);background:var(--s1)}
