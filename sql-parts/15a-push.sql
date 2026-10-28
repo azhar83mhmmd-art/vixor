@@ -132,17 +132,19 @@ create trigger trg_push_message after insert on public.messages for each row exe
 drop trigger if exists trg_push_friend on public.friendships;
 create trigger trg_push_friend after insert on public.friendships for each row execute function public.push_trg_friend();
 
+-- 4) Pemicu panggilan. Fungsi dibuat biasa (isi baru dievaluasi saat dipanggil); pemicunya dipasang hanya bila tabelnya ada.
+create or replace function public.push_trg_call() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.state = 'invited' then perform public.push_post(jsonb_build_object('type', 'call', 'call_id', new.call_id, 'user_id', new.user_id)); end if;
+  return null;
+exception when others then return null;
+end $$;
+
 do $$ begin
   if to_regclass('public.call_participants') is not null then
-    execute $f$create or replace function public.push_trg_call() returns trigger
-      language plpgsql security definer set search_path = public as $b$
-      begin
-        if new.state = 'invited' then perform public.push_post(jsonb_build_object('type', 'call', 'call_id', new.call_id, 'user_id', new.user_id)); end if;
-        return null;
-      exception when others then return null;
-      end $b$$f$;
-    execute 'drop trigger if exists trg_push_call on public.call_participants';
-    execute 'create trigger trg_push_call after insert on public.call_participants for each row execute function public.push_trg_call()';
+    drop trigger if exists trg_push_call on public.call_participants;
+    create trigger trg_push_call after insert on public.call_participants for each row execute function public.push_trg_call();
   end if;
 end $$;
 
