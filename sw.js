@@ -17,6 +17,13 @@ self.addEventListener('push', (event) => {
   const d = parse(event);
   event.waitUntil((async () => {
     if (!d || typeof d.title !== 'string') return self.registration.showNotification('ORVIX', { body: 'Ada pembaruan baru.', icon: ICON, badge: BADGE, tag: 'orvix-generic' });
+    // Tanda "diterima" (centang 2 abu-abu): perangkat ini benar-benar menerima push. Endpoint langganan = bukti identitas perangkat.
+    if (d.ack && typeof d.ack.u === 'string' && d.ack.u.startsWith('https://')) {
+      try {
+        const sub = await self.registration.pushManager.getSubscription();
+        if (sub) await fetch(d.ack.u, { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json', apikey: d.ack.k, Authorization: 'Bearer ' + d.ack.k }, body: JSON.stringify({ ep: sub.endpoint, conv: d.ack.c }) });
+      } catch { /* tanpa internet / gagal: centang tetap satu */ }
+    }
     // Jika ORVIX sedang terbuka, terlihat, dan difokuskan, Realtime sudah menampilkannya di dalam aplikasi.
     const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     if (wins.some((c) => c.focused && c.visibilityState === 'visible')) return;
