@@ -412,8 +412,8 @@ body:not(.in-conv) .fab{bottom:calc(82px + var(--sb))}
 
 /* ===== Fitur baru: centang pesan, kutipan story, pesan sistem ===== */
 .tick{display:inline-flex;vertical-align:-3px;margin-left:4px;color:var(--tx3)}
-.tick.read{color:var(--cyan)}
-.msg.out .tick{color:rgba(255,255,255,.65)}.msg.out .tick.read{color:#7FF0FF}
+.tick.read{color:#53BDEB}
+.msg.out .tick{color:rgba(255,255,255,.65)}.msg.out .tick.read{color:#53BDEB}
 .seen-n{font-size:max(0.6875rem,11px);margin-left:3px;opacity:.8;cursor:pointer}
 .sysmsg{align-self:center;max-width:86%;text-align:center;font-size:0.7812rem;color:var(--tx2);background:var(--s1);border:1px solid var(--bd);border-radius:999px;padding:5px 12px;margin:6px 0;display:flex;gap:6px;align-items:center}
 .sq{display:flex;gap:10px;align-items:center;background:rgba(0,0,0,.22);border-left:3px solid var(--cyan);border-radius:10px;padding:8px;margin-bottom:6px;min-width:210px}
@@ -709,7 +709,7 @@ body::before{content:"";position:fixed;z-index:-1;pointer-events:none;inset:0}
 [data-theme=brutal] .msg.out,[data-theme=brutal] .post.out{background:var(--blue);color:#fff;border-color:var(--ink)}
 [data-theme=brutal] .msg .meta,[data-theme=brutal] .post footer{color:rgba(255,255,255,.7)}
 [data-theme=brutal] .msg.in .meta{color:var(--tx3)}
-[data-theme=brutal] .msg.out .tick,[data-theme=brutal] .msg.out .tick.read{color:#fff}[data-theme=brutal] .msg.out .tick.read{color:var(--acc)}
+[data-theme=brutal] .msg.out .tick,[data-theme=brutal] .msg.out .tick.read{color:#fff}[data-theme=brutal] .msg.out .tick.read{color:#2F9BD6}
 [data-theme=brutal] .msg.gone,[data-theme=brutal] .post.gone{box-shadow:none;border-style:dashed;background:transparent}
 [data-theme=brutal] .msg .who{color:var(--acc);font-weight:800}
 [data-theme=brutal] .day{background:var(--s3);color:var(--tx);border:2px solid var(--bd);border-radius:6px;font-weight:700}
