@@ -157,3 +157,7 @@ Gejala Diagnosa: "Tidak terjangkau dari browser: Failed to fetch", "Ekstensi pg_
 3. Deploy ulang frontend, muat ulang Profil, tekan Diagnosa. Bila CORS masih memblokir, Diagnosa kini menyebut origin yang ditolak.
 
 **Diagnosa khusus admin**: tombol "Diagnosa notifikasi" hanya tampil untuk akun role admin, dan RPC `push_diag` menolak non-admin ("Khusus admin."). Jalankan `sql-parts/18b-diagnosa-admin.sql` sekali.
+
+## 19. Centang pesan seperti WhatsApp
+- Jam = menunggu koneksi pengirim (teks dikirim otomatis saat online lagi). Satu centang = tersimpan di server. Dua abu-abu = perangkat penerima menerima (aplikasi terbuka, atau push tiba lewat service worker, RPC `push_ack`). Dua biru = sudah dibaca.
+- Jalankan `sql-parts/18c-centang-diterima.sql`, deploy ulang `push-send` dan frontend.
