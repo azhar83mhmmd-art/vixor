@@ -1,6 +1,6 @@
 // Logika murni (tanpa Deno/jaringan) untuk menyusun payload notifikasi. Diuji terpisah dengan Node.
 export type Prefs = { messages?: boolean; groups?: boolean; friends?: boolean; calls?: boolean; preview?: boolean };
-export type Payload = { type: string; title: string; body: string; tag: string; url: string };
+export type Payload = { type: string; title: string; body: string; tag: string; url: string; ack?: { u: string; k: string; c: string } };
 export const DEFAULTS: Required<Prefs> = { messages: true, groups: true, friends: true, calls: true, preview: true };
 export const prefsOf = (p: Prefs | null | undefined): Required<Prefs> => ({ ...DEFAULTS, ...(p ?? {}) });
 
