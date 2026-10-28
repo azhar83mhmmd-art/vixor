@@ -30,6 +30,7 @@ self.addEventListener('push', (event) => {
     await self.registration.showNotification(title, {
       body: String(d.body || '').slice(0, 160), icon: ICON, badge: BADGE, tag, renotify: true,
       requireInteraction: d.type === 'call', silent: false,
+      vibrate: d.type === 'call' ? [400, 200, 400, 200, 400] : [150, 80, 150],   // getar membantu notifikasi tampil sebagai banner (heads-up) di banyak HP
       data: { url: typeof d.url === 'string' && d.url.startsWith('/') ? d.url : '/chat', type: d.type, count },
     });
   })());
