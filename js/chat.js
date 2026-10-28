@@ -1,9 +1,11 @@
 // Dashboard chat: daftar percakapan, chat pribadi/grup, teman, Realtime.
-import { sb, requireAuth, track, fetchProfiles, fetchFriendships, errMsg, cacheMe } from './supabase.js';
+import { sb, requireAuth, track, untrack, fetchProfiles, fetchFriendships, errMsg, cacheMe } from './supabase.js';
 import { openPremiumHub } from './premium.js';
-import { sendMessage, removeMedia, mediaHTML, hydrate, lightbox, isPlaceholder, ACCEPT } from './media.js';
-import { shareInvite } from './share.js';
+import { sendMessage, removeMedia, mediaHTML, hydrate, lightbox, isPlaceholder, ACCEPT, fmtDur } from './media.js';
 import { pushActiveLocal } from './push.js';
+import { Recorder, voiceSupported, bindPlayer, syncVoice, stopVoice } from './voice.js';
+import { ensureUnlocked, isUnlocked, unlockSession, onRelock, lockSession, hasPin, emojiPicker, QUICK, forwardPicker, mutePicker, isMuted, starredModal } from './chatx.js';
+import { shareInvite } from './share.js';
 import { draftBind, draftClear, openScheduleModal, openScheduledList, openSearch, premiumInfo } from './advmsg.js';
 import { startCall, joinCall, activeSession, openCalls, bus as callBus } from './calls-core.js';
 import { $, $$, esc, icon, avatar, nameWithBadge, verifiedBadge, fmtTime, fmtDay, listTime, relTime, toast, setBusy, openModal, confirmDialog, copyText, debounce, mountShell, profileScreen, isPremium } from './utils.js';
@@ -11,13 +13,14 @@ import { $, $$, esc, icon, avatar, nameWithBadge, verifiedBadge, fmtTime, fmtDay
 const { profile: me } = await requireAuth({ shell: '/chat' });
 mountShell('/chat', me.role === 'admin');
 const CK = 'orvix:convs:' + me.id;
-const saveConvs = (d) => { try { sessionStorage.setItem(CK, JSON.stringify(d)); } catch { /* abaikan */ } };
+const saveConvs = (d) => { try { sessionStorage.setItem(CK, JSON.stringify(d.map((c) => (c.locked ? { ...c, last_content: '' } : c)))); } catch { /* abaikan */ } };
 
 const PAGE = 40, DEL_MS = 60 * 60 * 1000;
 const editMs = () => (isPremium(me) ? 60 : 15) * 60 * 1000;   // Premium: edit pesan hingga 1 jam
 let sel = new Set(), selMode = false, blocked = new Set(), lpFired = false;
 let msel = new Set(), mlpT, mlpFired = false, selPushed = false, skipPop = false;   // pilihan pesan (tekan lama) di dalam percakapan
 let convs = [], tab = 'all', q = '', activeId = null, msgs = [], hasMore = false, seq = 0;
+let view = 'main', replyTo = null, reacts = new Map(), starred = new Set(), replyCache = new Map(), typingCh = null, typingT = 0, typers = new Map(), rec = null, recT = 0, newBelow = 0;   // tampilan daftar (main/archived/locked), balasan, reaksi, bintang, mengetik, perekam suara
 let reads = new Map(), members = [], disSecs = null, stInfo = new Map(), sUrls = new Map();   // status pesan, anggota, pesan sementara, referensi story
 const prof = new Map();            // cache profil
 const layout = $('#layout'), thread = $('#thread'), listEl = $('#convList');
@@ -25,12 +28,18 @@ const layout = $('#layout'), thread = $('#thread'), listEl = $('#convList');
 $('#btnReq').innerHTML = icon('bell') + '<span class="badge-n hide" id="reqN"></span>';
 $('#btnPrem').innerHTML = icon('crown'); $('#btnFriends').innerHTML = icon('users'); $('#btnAdd').innerHTML = icon('userplus'); $('#fab').innerHTML = icon('plus', 24);
 $('.searchbar').innerHTML = `${icon('search')}<input class="inp" id="q" type="search" placeholder="Cari chat atau ID ORVIX" aria-label="Cari chat atau ID ORVIX" autocomplete="off">`;
-$('.pane-head').insertAdjacentHTML('afterend', `<header class="pane-head sel-head hide" id="selHead"><button class="ibtn" id="selX" aria-label="Batal memilih">${icon('x')}</button><h1 id="selN">0</h1><button class="ibtn" id="selAll" aria-label="Pilih semua">${icon('selall')}</button><button class="ibtn" id="selPin" aria-label="Sematkan chat">${icon('pin')}</button><button class="ibtn" id="selDel" aria-label="Hapus chat">${icon('trash')}</button></header>`);
+$('.pane-head').insertAdjacentHTML('afterend', `<header class="pane-head sel-head hide" id="selHead"><button class="ibtn" id="selX" aria-label="Batal memilih">${icon('x')}</button><h1 id="selN">0</h1><button class="ibtn" id="selPin" aria-label="Sematkan chat">${icon('pin')}</button><button class="ibtn" id="selArch" aria-label="Arsipkan chat">${icon('archive')}</button><button class="ibtn" id="selDel" aria-label="Hapus chat">${icon('trash')}</button><button class="ibtn" id="selMore" aria-label="Lainnya">${icon('more')}</button></header>`);
 listEl.insertAdjacentHTML('beforebegin', '<div id="conn" class="alert warn hide" style="margin:0 14px 8px">Menghubungkan ulang…</div>');
 
 let lastSeenTxt = '';
 const lastSeenText = (t) => (Date.now() - new Date(t) < 120000 ? 'Online' : 'Terakhir aktif ' + relTime(t));
-const paintSub = () => { const el = $('#hSub'); if (!el) return; const c = curConv() || {}; el.textContent = [c.conv_type === 'group' ? 'Grup' : lastSeenTxt, disSecs ? 'Pesan sementara ' + DIS[disSecs] : ''].filter(Boolean).join(' · '); };
+const paintSub = () => {
+  const el = $('#hSub'); if (!el) return; const c = curConv() || {}, now = Date.now();
+  const act = [...typers].filter(([, t]) => t > now).map(([u]) => u), grp = c.conv_type === 'group';
+  const tp = act.length ? (grp ? act.map((u) => (prof.get(u)?.display_name || 'Seseorang').split(' ')[0]).join(', ') + ' sedang mengetik…' : 'sedang mengetik…') : '';
+  el.classList.toggle('typing', !!tp);
+  el.textContent = tp || [grp ? 'Grup' : lastSeenTxt, disSecs ? 'Pesan sementara ' + DIS[disSecs] : '', isMuted(c) ? 'Dibisukan' : ''].filter(Boolean).join(' · ');
+};
 const DIS = { 0: 'Nonaktif', 86400: '24 jam', 604800: '7 hari', 7776000: '90 hari' };
 const convName = (c) => (c.conv_type === 'group' ? c.title || 'Grup' : c.other_name || 'Pengguna');
 const previewOf = (c) => (c.last_at ? (c.last_deleted ? (c.last_sender === me.id ? 'Kamu menghapus pesan ini' : 'Pesan ini telah dihapus') : (c.last_sender === me.id ? 'Kamu: ' : '') + c.last_content) : 'Belum ada pesan');
@@ -45,23 +54,40 @@ async function loadConvs() {
 }
 const refreshList = debounce(async () => { const { data } = await sb.rpc('list_my_conversations'); if (data) { convs = data.filter((x) => x.conv_type !== 'channel'); saveConvs(convs); renderList(); } }, 400);
 
+const isUnr = (c) => c.unread > 0 || c.marked_unread;
+const inView = (c) => (view === 'archived' ? c.archived && !c.locked : view === 'locked' ? c.locked : !c.archived && !c.locked);
+const VIEW_T = { archived: 'Diarsipkan', locked: 'Chat terkunci' };
 function renderList() {
-  const s = q.trim().toLowerCase();
-  let rows = convs.filter((c) => (tab === 'all' || c.conv_type === tab) && (!s || convName(c).toLowerCase().includes(s) || (c.other_username || '').includes(s) || (c.last_content || '').toLowerCase().includes(s)));
-  let html = /^\d{8}$/.test(s) ? `<button class="item" data-id-search="${esc(s)}"><span class="av" style="width:46px;height:46px">${icon('search')}</span><span class="grow"><span class="t">Cari ID ORVIX ${esc(s)}</span><span class="p">Ketuk untuk mencari teman</span></span></button>` : '';
-  if (!rows.length && !html) {
-    html = convs.length ? `<div class="empty"><h3>Tidak ada hasil</h3><p>Coba kata kunci lain.</p></div>` : `<div class="empty">${icon('chat', 40)}<h3>Belum ada percakapan</h3><p>Tambahkan teman dengan ID ORVIX-nya, lalu mulai chat.</p><button class="btn primary" id="emptyAdd" style="margin-top:14px">Tambah teman</button></div>`;
+  const s = q.trim().toLowerCase(), arch = convs.filter((c) => c.archived && !c.locked), lck = convs.filter((c) => c.locked);
+  let rows = convs.filter((c) => inView(c) && (tab === 'all' || (tab === 'unread' ? isUnr(c) : c.conv_type === tab)) && (!s || convName(c).toLowerCase().includes(s) || (c.other_username || '').includes(s) || (view !== 'locked' && (c.last_content || '').toLowerCase().includes(s))));
+  let html = view !== 'main' ? `<div class="lv-h"><button class="ibtn" data-lvback aria-label="Kembali">${icon('back')}</button><span class="grow"><b>${VIEW_T[view]}</b><small class="dim" style="display:block">${view === 'archived' ? 'Chat diarsipkan muncul lagi di daftar saat ada pesan baru.' : 'Disembunyikan dari daftar utama dan notifikasinya tanpa isi pesan.'}</small></span></div>` : '';
+  if (view === 'main' && !s && tab === 'all') {
+    if (arch.length) html += `<button class="item folder" data-folder="archived"><span class="av folder-av">${icon('archive', 22)}</span><span class="grow"><span class="t"><span>Diarsipkan</span><span class="when">${arch.length}</span></span></span></button>`;
+    if (lck.length || hasPin(me.id)) html += `<button class="item folder" data-folder="locked"><span class="av folder-av">${icon('lock', 22)}</span><span class="grow"><span class="t"><span>Chat terkunci</span><span class="when">${lck.length || ''}</span></span></span></button>`;
+  }
+  html += /^\d{8}$/.test(s) ? `<button class="item" data-id-search="${esc(s)}"><span class="av" style="width:46px;height:46px">${icon('search')}</span><span class="grow"><span class="t">Cari ID ORVIX ${esc(s)}</span><span class="p">Ketuk untuk mencari teman</span></span></button>` : '';
+  if (!rows.length && !/^\d{8}$/.test(s)) {
+    html += view !== 'main' ? `<div class="empty">${icon(view === 'archived' ? 'archive' : 'lock', 40)}<h3>${view === 'archived' ? 'Tidak ada chat diarsipkan' : 'Belum ada chat terkunci'}</h3><p>${view === 'archived' ? 'Pilih chat (tekan lama), lalu ketuk ikon arsip.' : 'Buka menu chat, lalu pilih Kunci chat.'}</p></div>`
+      : convs.filter(inView).length ? `<div class="empty"><h3>Tidak ada hasil</h3><p>${tab === 'unread' ? 'Semua chat sudah dibaca.' : 'Coba kata kunci lain.'}</p></div>` : `<div class="empty">${icon('chat', 40)}<h3>Belum ada percakapan</h3><p>Tambahkan teman dengan ID ORVIX-nya, lalu mulai chat.</p><button class="btn primary" id="emptyAdd" style="margin-top:14px">Tambah teman</button></div>`;
   }
   html += rows.map((c) => {
-    const nm = convName(c), av = c.conv_type === 'group' ? `<span class="av" style="width:48px;height:48px">${icon('users')}</span>` : avatar(nm, c.other_avatar, 48);
-    return `<button class="item ${c.conv_id === activeId ? 'on' : ''}${sel.has(c.conv_id) ? ' sel' : ''}" data-c="${c.conv_id}" aria-pressed="${sel.has(c.conv_id)}">${av}<span class="grow"><span class="t"><span class="ell">${nameWithBadge(nm, c.other_verified, 15, false, c.conv_type === 'group' ? null : c.other_id)}</span><span class="when">${listTime(c.last_at || c.created_at)}</span></span><span class="row between gap"><span class="p ell ${c.last_deleted ? 'gone-p' : ''}">${c.last_deleted ? icon('ban', 13) + ' ' : ''}${esc(previewOf(c))}</span>${c.pinned ? `<span class="pinned" aria-label="Disematkan">${icon('pin', 15)}</span>` : ''}${c.unread > 0 ? `<span class="unread" aria-label="${c.unread} belum dibaca">${c.unread > 99 ? '99+' : c.unread}</span>` : ''}</span></span></button>`;
+    const nm = convName(c), av = c.conv_type === 'group' ? `<span class="av" style="width:48px;height:48px">${icon('users')}</span>` : avatar(nm, c.other_avatar, 48), muted = isMuted(c);
+    const badge = c.unread > 0 ? `<span class="unread${muted ? ' muted' : ''}" aria-label="${c.unread} belum dibaca">${c.unread > 99 ? '99+' : c.unread}</span>` : c.marked_unread ? '<span class="unread dot" aria-label="Ditandai belum dibaca"></span>' : '';
+    return `<button class="item ${c.conv_id === activeId ? 'on' : ''}${sel.has(c.conv_id) ? ' sel' : ''}" data-c="${c.conv_id}" aria-pressed="${sel.has(c.conv_id)}">${av}<span class="grow"><span class="t"><span class="ell">${nameWithBadge(nm, c.other_verified, 15, false, c.conv_type === 'group' ? null : c.other_id)}</span><span class="when${isUnr(c) && !muted ? ' hot' : ''}">${listTime(c.last_at || c.created_at)}</span></span><span class="row between gap"><span class="p ell ${c.last_deleted ? 'gone-p' : ''}">${c.last_deleted ? icon('ban', 13) + ' ' : ''}${esc(previewOf(c))}</span>${muted ? `<span class="pinned" aria-label="Dibisukan">${icon('mutebell', 15)}</span>` : ''}${c.pinned ? `<span class="pinned" aria-label="Disematkan">${icon('pin', 15)}</span>` : ''}${badge}</span></span></button>`;
   }).join('');
   listEl.innerHTML = html;
   $('#emptyAdd') && ($('#emptyAdd').onclick = addFriendModal);
 }
+async function setView(v) {
+  if (v === 'locked' && !(await ensureUnlocked(me, 'Masukkan PIN untuk membuka chat terkunci.'))) return;
+  view = v; sel.clear(); paintSel(); listEl.scrollTop = 0;
+}
+onRelock(() => { if (view === 'locked') view = 'main'; const c = curConv(); if (c && c.locked) { if (history.state?.c) history.back(); else closeConv(); } renderList(); toast('Chat terkunci dikunci kembali'); });
 listEl.onclick = (e) => {
   if (lpFired) { lpFired = false; return; }
   const it = e.target.closest('[data-c]'); if (it && selMode) return toggleSel(it.dataset.c);
+  const fo = e.target.closest('[data-folder]'); if (fo) return fo.dataset.folder === 'locked' && !hasPin(me.id) ? lockIntro() : setView(fo.dataset.folder);
+  if (e.target.closest('[data-lvback]')) return setView('main');
   const s = e.target.closest('[data-id-search]'); if (s) return addFriendModal(s.dataset.idSearch);
   const c = e.target.closest('[data-c]'); if (c) openConv(c.dataset.c);
 };
@@ -76,7 +102,10 @@ function paintSel() {
   $('#selHead').classList.toggle('hide', !selMode); $('.pane-head:not(.sel-head)').classList.toggle('hide', selMode);
   $('#selN').textContent = sel.size; const rows = convs.filter((c) => sel.has(c.conv_id));
   $('#selPin').setAttribute('aria-label', rows.length && rows.every((c) => c.pinned) ? 'Lepas sematan' : 'Sematkan chat');
-  $('#selPin').classList.toggle('on', rows.length > 0 && rows.every((c) => c.pinned)); renderList();
+  $('#selPin').classList.toggle('on', rows.length > 0 && rows.every((c) => c.pinned));
+  $('#selPin').classList.toggle('hide', view !== 'main');
+  $('#selArch').setAttribute('aria-label', view === 'archived' ? 'Keluarkan dari arsip' : 'Arsipkan chat'); $('#selArch').classList.toggle('hide', view === 'locked');
+  renderList();
 }
 listEl.addEventListener('pointerdown', (e) => { const it = e.target.closest('[data-c]'); if (!it || e.button > 0) return; lpX = e.clientX; lpY = e.clientY; clearTimeout(lpT); lpT = setTimeout(() => { lpFired = true; selectOn(it.dataset.c); }, 450); });
 listEl.addEventListener('pointermove', (e) => { if (Math.abs(e.clientX - lpX) > 8 || Math.abs(e.clientY - lpY) > 8) clearTimeout(lpT); });
@@ -87,7 +116,25 @@ document.addEventListener('keydown', (e) => {
   if (msel.size) exitMsel(); else if (selMode) exitSel();
 });
 $('#selX').onclick = exitSel;
-$('#selAll').onclick = () => { const vis = [...listEl.querySelectorAll('[data-c]')].map((x) => x.dataset.c); vis.every((i) => sel.has(i)) ? vis.forEach((i) => sel.delete(i)) : vis.forEach((i) => sel.add(i)); paintSel(); };
+const selRowsC = () => convs.filter((c) => sel.has(c.conv_id));
+const prefCall = async (fn, args, ok) => { const { error } = await sb.rpc(fn, args); if (error) { toast(dbErr(error, '17a-fitur-chat.sql'), 'error'); return false; } if (ok) toast(ok, 'success'); await loadConvs(); return true; };
+const leaveActiveIf = (ids) => { if (ids.includes(activeId)) { if (history.state?.c) history.back(); else closeConv(); } };
+$('#selArch').onclick = async () => {
+  const ids = [...sel], on = view !== 'archived'; if (!ids.length) return;
+  if (await prefCall('orvix_archive_conversations', { convs: ids, p_on: on }, on ? (ids.length > 1 ? `${ids.length} chat diarsipkan` : 'Chat diarsipkan') : 'Dikeluarkan dari arsip')) { if (on) leaveActiveIf(ids); exitSel(); }
+};
+$('#selMore').onclick = () => {
+  const rows = selRowsC(), allMuted = rows.length && rows.every(isMuted), allUnr = rows.length && rows.every((c) => c.marked_unread || c.unread > 0), allLocked = rows.length && rows.every((c) => c.locked);
+  const m = openModal({ title: `${rows.length} chat dipilih`, sheet: true, html: `<div class="col"><button class="btn" data-a="mute">${icon(allMuted ? 'bell' : 'mutebell')} ${allMuted ? 'Bunyikan notifikasi' : 'Bisukan notifikasi'}</button><button class="btn" data-a="lock">${icon(allLocked ? 'unlock' : 'lock')} ${allLocked ? 'Buka kunci chat' : 'Kunci chat'}</button><button class="btn" data-a="unread">${icon('unread')} ${allUnr ? 'Tandai sudah dibaca' : 'Tandai belum dibaca'}</button><button class="btn" data-a="all">${icon('selall')} Pilih semua</button></div>` });
+  m.el.onclick = async (e) => {
+    const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return; m.close(); const ids = [...sel];
+    if (a === 'all') { const vis = [...listEl.querySelectorAll('[data-c]')].map((x) => x.dataset.c); vis.every((i) => sel.has(i)) ? vis.forEach((i) => sel.delete(i)) : vis.forEach((i) => sel.add(i)); return paintSel(); }
+    if (a === 'mute') { const u = await mutePicker(allMuted); if (u === undefined) return; if (await prefCall('orvix_mute_conversations', { convs: ids, p_until: u }, u ? 'Notifikasi dibisukan' : 'Notifikasi dibunyikan')) exitSel(); }
+    if (a === 'unread') { if (await prefCall('orvix_mark_unread', { convs: ids, flag: !allUnr }, allUnr ? 'Ditandai sudah dibaca' : 'Ditandai belum dibaca')) exitSel(); }
+    if (a === 'lock') { if (!(await ensureUnlocked(me))) return; if (await prefCall('orvix_lock_conversations', { convs: ids, p_on: !allLocked }, allLocked ? 'Kunci dibuka' : 'Chat dikunci')) { if (!allLocked) leaveActiveIf(ids); exitSel(); } }
+  };
+};
+async function lockIntro() { if (await ensureUnlocked(me)) toast('PIN dibuat. Buka menu chat, lalu pilih Kunci chat.', 'success'); renderList(); }
 $('#selPin').onclick = async () => {
   const rows = convs.filter((c) => sel.has(c.conv_id)), unpin = rows.length && rows.every((c) => c.pinned);
   const { error } = await sb.rpc('orvix_pin_conversations', { convs: [...sel], pin: !unpin });
@@ -112,7 +159,7 @@ let unbindDraft = () => {};
 const titleOf = (id) => { const c = convs.find((x) => x.conv_id === id); return c ? convName(c) : 'Percakapan'; };
 function scheduleHere(text) {
   const c = curConv(); if (!c) return;
-  openScheduleModal({ me, convId: c.conv_id, convTitle: convName(c), text, onDone: () => { const ci = $('#ci'); if (ci && text && ci.value.trim() === text) { ci.value = ''; ci.style.height = 'auto'; $('#sendBtn').disabled = true; draftClear(me, c.conv_id); } } });
+  openScheduleModal({ me, convId: c.conv_id, convTitle: convName(c), text, onDone: () => { const ci = $('#ci'); if (ci && text && ci.value.trim() === text) { ci.value = ''; ci.style.height = 'auto'; draftClear(me, c.conv_id); ci.dispatchEvent(new Event('input')); } } });
 }
 function searchHere(all) {
   const c = all ? null : curConv(), senders = c && c.conv_type === 'group' ? members.filter((u) => u !== me.id).map((u) => ({ id: u, name: prof.get(u)?.display_name || 'Anggota' })) : c && c.other_id ? [{ id: c.other_id, name: c.other_name || 'Lawan chat' }] : [];
@@ -120,17 +167,24 @@ function searchHere(all) {
 }
 
 async function openConv(id, push = true) {
+  const c0 = convs.find((x) => x.conv_id === id);
+  if (c0?.locked && !(isUnlocked() ? true : await ensureUnlocked(me, 'Masukkan PIN untuk membuka chat ini.'))) return;
+  if (c0?.locked) unlockSession(); if (c0?.marked_unread) { c0.marked_unread = false; sb.rpc('orvix_mark_unread', { convs: [id], flag: false }).then(() => {}, () => {}); }
+  cancelRec(); stopVoice(); closeTyping(); replyTo = null; reacts = new Map(); starred = new Set(); newBelow = 0;
   msel.clear(); selPushed = false; thread.classList.remove('msel');
   activeId = id; msgs = []; hasMore = false; reads = new Map(); members = []; disSecs = null; layout.classList.add('open'); document.body.classList.add('in-conv');
   if (push) history.pushState({ c: id }, '');
   const c = curConv() || {}, grp = c.conv_type === 'group', nm = convName(c);
   lastSeenTxt = '';
-  thread.innerHTML = `<header class="thead"><button class="ibtn back" aria-label="Kembali ke daftar chat">${icon('back')}</button><button class="row gap grow" id="hProfile" style="text-align:left;min-width:0">${grp ? `<span class="av" style="width:42px;height:42px">${icon('users')}</span>` : avatar(nm, c.other_avatar, 42)}<span class="grow"><span class="ell" style="display:block;font-weight:600">${nameWithBadge(nm, c.other_verified, 16, true, c.conv_type === 'group' ? null : c.other_id)}</span><span class="sub ell" id="hSub" style="display:block">${grp ? 'Grup' : ''}</span></span></button><button class="ibtn" id="hVoice" aria-label="${grp ? 'Panggilan suara grup' : 'Panggilan suara'}">${icon('phone')}</button><button class="ibtn" id="hVideo" aria-label="${grp ? 'Panggilan video grup' : 'Panggilan video'}">${icon('video')}</button><button class="ibtn" id="hMenu" aria-label="Menu percakapan">${icon('more')}</button></header><header class="msel-head hide" id="mselHead"><button class="ibtn" id="mselX" aria-label="Batal memilih pesan">${icon('x')}</button><h1 id="mselN" aria-live="polite">0 dipilih</h1><button class="ibtn" id="mselCopy" aria-label="Salin pesan">${icon('copy')}</button><button class="ibtn hide" id="mselEdit" aria-label="Edit pesan">${icon('edit')}</button><button class="ibtn hide" id="mselRep" aria-label="Laporkan pesan">${icon('flag')}</button><button class="ibtn danger" id="mselDel" aria-label="Hapus pesan">${icon('trash')}</button></header><div class="cl-banner" id="callBanner" hidden></div><div class="msgs" id="msgs" role="log" aria-live="polite" tabindex="0"><div class="empty">Memuat pesan…</div></div><form class="composer" id="cf"><button type="button" class="ibtn" id="attach" aria-label="Kirim foto atau video">${icon('clip')}</button><input type="file" id="mf" accept="${ACCEPT}" hidden><textarea class="inp" id="ci" rows="1" maxlength="4000" placeholder="Tulis pesan" aria-label="Tulis pesan"></textarea>${isPremium(me) ? `<button type="button" class="ibtn" id="schedBtn" aria-label="Jadwalkan pesan">${icon('clock')}</button>` : ''}<button class="send" id="sendBtn" aria-label="Kirim pesan" disabled>${icon('send')}</button></form><div class="blockbar hide" id="blk" role="status"></div>`;
+  thread.innerHTML = `<header class="thead"><button class="ibtn back" aria-label="Kembali ke daftar chat">${icon('back')}</button><button class="row gap grow" id="hProfile" style="text-align:left;min-width:0">${grp ? `<span class="av" style="width:42px;height:42px">${icon('users')}</span>` : avatar(nm, c.other_avatar, 42)}<span class="grow"><span class="ell" style="display:block;font-weight:600">${nameWithBadge(nm, c.other_verified, 16, true, c.conv_type === 'group' ? null : c.other_id)}</span><span class="sub ell" id="hSub" style="display:block">${grp ? 'Grup' : ''}</span></span></button><button class="ibtn" id="hVoice" aria-label="${grp ? 'Panggilan suara grup' : 'Panggilan suara'}">${icon('phone')}</button><button class="ibtn" id="hVideo" aria-label="${grp ? 'Panggilan video grup' : 'Panggilan video'}">${icon('video')}</button><button class="ibtn" id="hMenu" aria-label="Menu percakapan">${icon('more')}</button></header><header class="msel-head hide" id="mselHead"><button class="ibtn" id="mselX" aria-label="Batal memilih pesan">${icon('x')}</button><h1 id="mselN" aria-live="polite">0 dipilih</h1><button class="ibtn hide" id="mselReply" aria-label="Balas pesan">${icon('reply')}</button><button class="ibtn" id="mselStar" aria-label="Bintangi pesan">${icon('star')}</button><button class="ibtn" id="mselFwd" aria-label="Teruskan pesan">${icon('forward')}</button><button class="ibtn" id="mselCopy" aria-label="Salin pesan">${icon('copy')}</button><button class="ibtn hide" id="mselEdit" aria-label="Edit pesan">${icon('edit')}</button><button class="ibtn hide" id="mselRep" aria-label="Laporkan pesan">${icon('flag')}</button><button class="ibtn danger" id="mselDel" aria-label="Hapus pesan">${icon('trash')}</button></header><div class="cl-banner" id="callBanner" hidden></div><div class="msgs" id="msgs" role="log" aria-live="polite" tabindex="0"><div class="empty">Memuat pesan…</div></div><button class="tobottom hide" id="toBottom" aria-label="Ke pesan terbaru">${icon('arrowdown', 20)}<span class="tb-n hide" id="tbN"></span></button><div class="replybar hide" id="replyBar"></div><form class="composer" id="cf"><button type="button" class="ibtn" id="emoBtn" aria-label="Emoji">${icon('smile')}</button><button type="button" class="ibtn" id="attach" aria-label="Kirim foto atau video">${icon('clip')}</button><input type="file" id="mf" accept="${ACCEPT}" hidden><textarea class="inp" id="ci" rows="1" maxlength="4000" placeholder="Tulis pesan" aria-label="Tulis pesan"></textarea>${isPremium(me) ? `<button type="button" class="ibtn" id="schedBtn" aria-label="Jadwalkan pesan">${icon('clock')}</button>` : ''}<button type="button" class="send mic" id="micBtn" aria-label="Rekam pesan suara">${icon('mic', 22)}</button><button class="send hide" id="sendBtn" aria-label="Kirim pesan" disabled>${icon('send')}</button><div class="recbar" id="recBar"><button type="button" class="ibtn danger" id="recCancel" aria-label="Batalkan rekaman">${icon('trash')}</button><span class="rec-dot" aria-hidden="true"></span><span class="rec-t" id="recT" aria-live="off">0:00</span><span class="rec-lv" id="recLv" aria-hidden="true"></span><button type="button" class="ibtn" id="recPause" aria-label="Jeda rekaman">${icon('pause')}</button><button type="button" class="send" id="recSend" aria-label="Kirim pesan suara">${icon('send')}</button></div></form><div class="blockbar hide" id="blk" role="status"></div>`;
   $('.back', thread).onclick = () => history.state?.c ? history.back() : closeConv();
   $('#hVoice').onclick = () => callFromChat('voice'); $('#hVideo').onclick = () => callFromChat('video'); paintCallBanner(); $('#attach').onclick = () => $('#mf').click(); $('#mf').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) sendMedia(f); };
   $('#hMenu').onclick = convMenu; $('#hProfile').onclick = showInfo;
   const ci = $('#ci'), sendBtn = $('#sendBtn');
-  ci.oninput = () => { ci.style.height = 'auto'; ci.style.height = Math.min(ci.scrollHeight, 140) + 'px'; sendBtn.disabled = !ci.value.trim(); };
+  const micBtn = $('#micBtn'), voiceOK = voiceSupported();
+  const syncSend = () => { const has = !!ci.value.trim(); sendBtn.disabled = !has; sendBtn.classList.toggle('hide', !has && voiceOK); micBtn.classList.toggle('hide', has || !voiceOK); };
+  ci.oninput = () => { ci.style.height = 'auto'; ci.style.height = Math.min(ci.scrollHeight, 140) + 'px'; syncSend(); if (ci.value.trim()) sendTyping(); };
+  syncSend(); bindComposerX(ci, syncSend);
   ci.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && matchMedia('(pointer:fine)').matches) { e.preventDefault(); $('#cf').requestSubmit(); } };
   $('#cf').onsubmit = (e) => { e.preventDefault(); sendMsg(); };
   unbindDraft(); unbindDraft = draftBind(me, ci, id);   // draft Premium per percakapan (pulih saat dibuka lagi)
@@ -141,8 +195,11 @@ async function openConv(id, push = true) {
     if (msel.size && it && !e.target.closest('[data-retry],[data-story],[data-older]')) return toggleMsel(it.dataset.m);   // saat memilih: ketuk = pilih/lepas
     const im = e.target.closest('.mm img'); if (im) return lightbox(im.src); onMsgClick(e);
   };
-  $('#msgs').addEventListener('scroll', markRead, { passive: true });
-  bindMsgSelect($('#msgs'));
+  $('#msgs').addEventListener('scroll', () => { markRead(); paintToBottom(); }, { passive: true });
+  bindMsgSelect($('#msgs')); bindPlayer($('#msgs')); bindSwipeReply($('#msgs')); $('#toBottom').onclick = () => { const el = $('#msgs'); el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); newBelow = 0; paintToBottom(); };
+  $('#mselReply').onclick = () => { const m = selRows()[0]; if (m) { exitMsel(); startReply(m); } };
+  $('#mselFwd').onclick = () => { const r = selRows(); if (r.length) { exitMsel(); forwardMsgs(r); } };
+  $('#mselStar').onclick = () => { const r = selRows(), on = !r.every((m) => starred.has(m.id)); exitMsel(); starMsgs(r, on); };
   $('#mselX').onclick = () => exitMsel(); $('#mselCopy').onclick = copySelected; $('#mselDel').onclick = delSelected;
   $('#mselEdit').onclick = () => { const m = selRows()[0]; if (m && canEditMsg(m)) { exitMsel(); editMsg(m); } };
   $('#mselRep').onclick = () => { const m = selRows()[0]; if (m && m.sender_id !== me.id) { exitMsel(); reportModal(m.sender_id, prof.get(m.sender_id)?.display_name, m.id); } };
@@ -152,7 +209,7 @@ async function openConv(id, push = true) {
     members = (mem || []).map((m) => m.user_id); disSecs = cv?.disappear_secs || null; paintSub();
     await ensureProfiles(members);
     await Promise.all([loadMsgs(id), loadReads(id)]);
-    loadStoryRefs();
+    loadStoryRefs(); loadExtras(id); subscribeTyping(id);
   } catch (e) { if (activeId === id) $('#msgs').innerHTML = `<div class="empty"><h3>Gagal memuat pesan</h3><p>${esc(errMsg(e))}</p><button class="btn" id="rt2" style="margin-top:12px">Coba lagi</button></div>`; $('#rt2') && ($('#rt2').onclick = () => openConv(id, false)); return; }
   paintBlock(); markRead(); if (!blocked.has(c.other_id)) setTimeout(() => ci.focus({ preventScroll: true }), 50);
   if (!grp && c.other_id) sb.rpc('get_last_seen', { target: c.other_id }).then(({ data }) => {
@@ -162,7 +219,7 @@ async function openConv(id, push = true) {
 }
 
 function closeConv() {
-  unbindDraft(); unbindDraft = () => {};
+  unbindDraft(); unbindDraft = () => {}; cancelRec(); stopVoice(); closeTyping(); replyTo = null; reacts = new Map();
   msel.clear(); selPushed = false; thread.classList.remove('msel');
   activeId = null; msgs = []; layout.classList.remove('open'); document.body.classList.remove('in-conv');
   thread.innerHTML = `<div class="empty" style="margin:auto">${icon('chat', 44)}<h3>Pilih percakapan</h3><p>Atau tambahkan teman dengan ID ORVIX.</p></div>`; renderList();
@@ -246,22 +303,32 @@ function render(mode = 'auto') {
     if (m.deleted_at) { html += `<div class="msg gone ${mine ? 'out' : 'in'}">${icon('ban', 14)} <span>${mine ? 'Kamu menghapus pesan ini' : 'Pesan ini telah dihapus'}</span><span class="meta">${fmtTime(m.created_at)}</span></div>`; return; }
     const who = grp && !mine ? `<div class="who">${esc(prof.get(m.sender_id)?.display_name || 'Anggota')}</div>` : '';
     const picked = msel.has(m.id);
-    html += `<div class="msg ${mine ? 'out' : 'in'} ${m._st || ''}${picked ? ' sel' : ''}" data-m="${m.id}"${msel.size ? ` role="checkbox" aria-checked="${picked}"` : ''}>${who}${quoteHTML(m)}${mediaHTML(m)}${isPlaceholder(m) ? '' : esc(m.content)}<span class="meta">${m.expires_at ? icon('timer', 12) + ' ' : ''}${fmtTime(m.created_at)}${m.edited_at ? ' · diedit' : ''}${mine ? tickHTML(m) : ''}${m._st === 'failed' ? ' · gagal' : ''}${m._st === 'failed' ? ` <button class="btn sm" data-retry="${m.id}" style="min-height:26px;padding:0 10px">Coba lagi</button>` : ''}</span></div>`;
+    const rx = reacts.get(m.id), rxHTML = rx && rx.size ? `<span class="rxs">${[...[...rx.values()].reduce((a, e) => a.set(e, (a.get(e) || 0) + 1), new Map())].map(([e, n]) => `<button type="button" class="rx${rx.get(me.id) === e ? ' mine' : ''}" data-rx="${esc(e)}" data-rm="${m.id}" aria-label="Reaksi ${esc(e)} ${n}">${esc(e)}${n > 1 ? `<i>${n}</i>` : ''}</button>`).join('')}</span>` : '';
+    html += `<div class="msg ${mine ? 'out' : 'in'} ${m._st || ''}${picked ? ' sel' : ''}${m.media_type === 'audio' ? ' vn-msg' : ''}${rxHTML ? ' has-rx' : ''}" data-m="${m.id}"${msel.size ? ` role="checkbox" aria-checked="${picked}"` : ''}>${who}${m.forwarded ? `<span class="fwd-l">${icon('forward', 12)} Diteruskan</span>` : ''}${replyQuote(m)}${quoteHTML(m)}${mediaHTML(m)}${isPlaceholder(m) ? '' : esc(m.content)}<span class="meta">${starred.has(m.id) ? `<span class="m-star">${icon('star', 11)}</span>` : ''}${m.expires_at ? icon('timer', 12) + ' ' : ''}${fmtTime(m.created_at)}${m.edited_at ? ' · diedit' : ''}${mine ? tickHTML(m) : ''}${m._st === 'failed' ? ' · gagal' : ''}${m._st === 'failed' ? ` <button class="btn sm" data-retry="${m.id}" style="min-height:26px;padding:0 10px">Coba lagi</button>` : ''}</span>${rxHTML}</div>`;
   });
-  el.innerHTML = html; hydrate(el).then(() => { if (mode === 'bottom' || near) el.scrollTop = el.scrollHeight; });
+  el.innerHTML = html; syncVoice(el); hydrate(el).then(() => { syncVoice(el); if (mode === 'bottom' || near) el.scrollTop = el.scrollHeight; }); paintToBottom();
   if (mode === 'bottom' || (mode === 'auto' && near)) el.scrollTop = el.scrollHeight; else if (mode === 'keep') el.scrollTop = el.scrollHeight - prevH;
 }
 
 async function onMsgClick(e) {
-  if (e.target.closest('[data-older]')) { const b = e.target.closest('[data-older]'); setBusy(b, true); try { await loadMsgs(activeId, true); } catch (x) { toast(errMsg(x), 'error'); setBusy(b, false); } return; }
+  if (e.target.closest('[data-older]')) { const b = e.target.closest('[data-older]'); setBusy(b, true); try { await loadMsgs(activeId, true); loadExtras(activeId); } catch (x) { toast(errMsg(x), 'error'); setBusy(b, false); } return; }
   const rt = e.target.closest('[data-retry]'); if (rt) { const m = msgs.find((x) => x.id === rt.dataset.retry); if (m) { m._st = 'sending'; render(); insertMsg(m); } return; }
   const sb2 = e.target.closest('[data-story]'); if (sb2) { location.href = '/updates?story=' + sb2.dataset.story; return; }
   const sn = e.target.closest('[data-seen]'); if (sn) { const mm = msgs.find((x) => x.id === sn.dataset.seen); if (mm) seenModal(mm); return; }
+  const rq = e.target.closest('[data-rq]'); if (rq) return jumpTo(rq.dataset.rq);
+  const rxb = e.target.closest('[data-rx]'); if (rxb) { const mm = msgs.find((x) => x.id === rxb.dataset.rm); if (mm) reactionsModal(mm); return; }
   const el = e.target.closest('[data-m]'); if (!el) return; const m = msgs.find((x) => x.id === el.dataset.m); if (!m || m._st) return;
-  const mine = m.sender_id === me.id, age = Date.now() - new Date(m.created_at), canEdit = mine && !m.media_path && age < editMs(), canDel = mine && age < DEL_MS;
-  const sh = openModal({ title: 'Pesan', sheet: true, html: `<div class="col">${m.media_path ? '' : `<button class="btn" data-a="copy">${icon('copy')} Salin</button>`}${canEdit ? `<button class="btn" data-a="edit">${icon('edit')} Edit (maks. ${isPremium(me) ? '1 jam' : '15 menit'})</button>` : ''}${mine ? (canDel ? `<button class="btn danger" data-a="del">${icon('trash')} Hapus untuk semua</button>` : `<p class="hint" style="text-align:center">Hapus untuk semua hanya tersedia dalam 1 jam setelah pesan dikirim.</p>`) : `<button class="btn" data-a="rep">${icon('flag')} Laporkan pesan</button>`}</div>` });
+  const mine = m.sender_id === me.id, age = Date.now() - new Date(m.created_at), canEdit = mine && !m.media_path && age < editMs(), canDel = mine && age < DEL_MS, grp = (curConv() || {}).conv_type === 'group';
+  const my = reacts.get(m.id)?.get(me.id), st = starred.has(m.id);
+  const sh = openModal({ title: 'Pesan', sheet: true, cls: 'msgmenu', html: `<div class="qr" role="group" aria-label="Beri reaksi">${QUICK.map((q) => `<button type="button" class="${my === q ? 'on' : ''}" data-q="${q}" aria-label="Reaksi ${q}">${q}</button>`).join('')}<button type="button" data-q="+" aria-label="Emoji lain">${icon('plus', 18)}</button></div><div class="col" style="gap:8px"><button class="btn" data-a="reply">${icon('reply')} Balas</button><button class="btn" data-a="fwd">${icon('forward')} Teruskan</button>${m.media_path ? '' : `<button class="btn" data-a="copy">${icon('copy')} Salin</button>`}<button class="btn" data-a="star">${icon('star')} ${st ? 'Lepas bintang' : 'Bintangi'}</button>${mine && grp ? `<button class="btn" data-a="info">${icon('eye')} Info pesan</button>` : ''}${canEdit ? `<button class="btn" data-a="edit">${icon('edit')} Edit (maks. ${isPremium(me) ? '1 jam' : '15 menit'})</button>` : ''}${mine ? (canDel ? `<button class="btn danger" data-a="del">${icon('trash')} Hapus untuk semua</button>` : `<p class="hint" style="text-align:center">Hapus untuk semua hanya tersedia dalam 1 jam setelah pesan dikirim.</p>`) : `<button class="btn" data-a="rep">${icon('flag')} Laporkan pesan</button>`}</div>` });
   sh.el.onclick = async (ev) => {
+    const q = ev.target.closest('[data-q]')?.dataset.q;
+    if (q) { sh.close(); if (q === '+') { const pop = emojiPicker({ anchor: thread, onPick: (em) => { pop.remove(); react(m, em); } }); return; } return react(m, q); }
     const a = ev.target.closest('[data-a]')?.dataset.a; if (!a) return; sh.close();
+    if (a === 'reply') startReply(m);
+    if (a === 'fwd') forwardMsgs([m]);
+    if (a === 'star') starMsgs([m], !st);
+    if (a === 'info') seenModal(m);
     if (a === 'copy') copyText(m.content);
     if (a === 'edit') editMsg(m);
     if (a === 'rep') reportModal(m.sender_id, prof.get(m.sender_id)?.display_name, m.id);
@@ -304,6 +371,8 @@ function paintMsel() {
   if (!on) return;
   $('#mselN').textContent = msel.size + ' dipilih';
   $('#mselCopy').classList.toggle('hide', !rows.some((m) => !m.media_path && m.content));
+  $('#mselReply').classList.toggle('hide', !one);
+  $('#mselStar').classList.toggle('on', rows.length > 0 && rows.every((m) => starred.has(m.id)));
   $('#mselEdit').classList.toggle('hide', !(one && canEditMsg(one)));
   $('#mselRep').classList.toggle('hide', !(one && one.sender_id !== me.id));
   $('#mselDel').setAttribute('aria-disabled', !rows.every(canDelMsg));
@@ -363,12 +432,13 @@ async function delSelected() {
 /* ---------- kirim ---------- */
 function sendMsg() {
   const ci = $('#ci'), text = ci.value.trim(); if (!text || text.length > 4000 || !activeId) return;
-  ci.value = ''; ci.style.height = 'auto'; $('#sendBtn').disabled = true; draftClear(me, activeId);
-  const tmp = { id: 'tmp-' + ++seq, conversation_id: activeId, sender_id: me.id, content: text, created_at: new Date().toISOString(), _st: 'sending' };
-  msgs.push(tmp); render('bottom'); insertMsg(tmp);
+  ci.value = ''; ci.style.height = 'auto'; ci.dispatchEvent(new Event('input')); draftClear(me, activeId);
+  const tmp = { id: 'tmp-' + ++seq, conversation_id: activeId, sender_id: me.id, content: text, created_at: new Date().toISOString(), _st: 'sending', reply_to: replyTo ? replyTo.id : null };
+  clearReply(); stopTypingNow(); msgs.push(tmp); render('bottom'); insertMsg(tmp);
 }
 async function insertMsg(tmp) {
-  const { data, error } = await sb.from('messages').insert({ conversation_id: tmp.conversation_id, sender_id: me.id, content: tmp.content }).select().single();
+  const row = { conversation_id: tmp.conversation_id, sender_id: me.id, content: tmp.content }; if (tmp.reply_to && !String(tmp.reply_to).startsWith('tmp-')) row.reply_to = tmp.reply_to;
+  const { data, error } = await sb.from('messages').insert(row).select().single();
   if (tmp.conversation_id !== activeId) { if (!error) refreshList(); return; }
   if (error) { tmp._st = 'failed'; render('auto'); return toast(sendErr(error), 'error'); }
   const cc = curConv(); if (cc?.conv_type === 'direct' && cc.other_id && !savedOnce.has(cc.other_id)) { savedOnce.add(cc.other_id); saveContact(cc.other_id, 'chat'); }
@@ -376,16 +446,16 @@ async function insertMsg(tmp) {
   msgs.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)); render('bottom'); refreshList();
 }
 async function sendMedia(file) {
-  const id = activeId, tmp = { id: 'tmp-' + ++seq, conversation_id: id, sender_id: me.id, content: 'Mengunggah…', created_at: new Date().toISOString(), _st: 'sending' };
-  msgs.push(tmp); render('bottom');
+  const id = activeId, rp = replyTo ? replyTo.id : null, tmp = { id: 'tmp-' + ++seq, conversation_id: id, sender_id: me.id, content: 'Mengunggah…', created_at: new Date().toISOString(), _st: 'sending', reply_to: rp };
+  clearReply(); msgs.push(tmp); render('bottom');
   try {
-    const row = await sendMessage({ conv: id, me: me.id, file, onProgress: (f) => { tmp.content = `Mengunggah ${Math.round(f * 100)}%`; const el = $(`[data-m="${tmp.id}"]`); if (el?.firstChild) el.firstChild.textContent = tmp.content; } });
+    const row = await sendMessage({ conv: id, me: me.id, file, replyTo: rp, onProgress: (f) => { tmp.content = `Mengunggah ${Math.round(f * 100)}%`; const el = $(`[data-m="${tmp.id}"]`); if (el?.firstChild) el.firstChild.textContent = tmp.content; } });
     if (id !== activeId) return refreshList();
     msgs = msgs.filter((m) => m !== tmp); if (!msgs.some((m) => m.id === row.id)) msgs.push(row); msgs.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)); render('bottom'); refreshList();
   } catch (e) { msgs = msgs.filter((m) => m !== tmp); render('auto'); toast(sendErr(e), 'error'); }
 }
 const savedOnce = new Set();
-const sendErr = (e) => (/row-level security|violates|permission denied/i.test(errMsg(e)) ? 'Pesan tidak terkirim. Kamu tidak bisa mengirim pesan ke percakapan ini.' : errMsg(e));
+const sendErr = (e) => (/Format berkas tidak diizinkan|reply_to|duration_ms|\bwave\b|forwarded|media_type_check|message_type_check/i.test(errMsg(e)) ? 'Fitur ini belum aktif di database. Jalankan sql-parts/17a-fitur-chat.sql di SQL Editor Supabase, lalu muat ulang halaman.' : /row-level security|violates|permission denied/i.test(errMsg(e)) ? 'Pesan tidak terkirim. Kamu tidak bisa mengirim pesan ke percakapan ini.' : errMsg(e));
 const saveContact = (uid, src) => sb.rpc('orvix_save_contact', { target: uid, src }).then(() => {}, () => {});
 const callCtx = (c) => ({ isGroup: c.conv_type === 'group', title: convName(c), avatar: c.other_avatar, otherId: c.other_id });
 async function callFromChat(kind) {
@@ -413,21 +483,34 @@ document.addEventListener('visibilitychange', markRead);
 setInterval(() => { const n = msgs.length; msgs = msgs.filter((m) => !m.expires_at || new Date(m.expires_at) > Date.now()); if (msgs.length !== n) { [...msel].forEach((i) => { if (!msgs.some((m) => m.id === i)) msel.delete(i); }); msel.size ? paintMsel() : exitMsel(); render('auto'); refreshList(); } }, 20000);
 
 /* ---------- Realtime ---------- */
-function notify(title, body) {
-  if (pushActiveLocal(me.id)) return;   // Web Push aktif: notifikasi datang dari service worker (tanpa dobel)
-  if (localStorage.getItem('orvix_notif') === '1' && 'Notification' in window && Notification.permission === 'granted') { try { new Notification(title, { body: body.slice(0, 120), icon: '/assets/mark.png' }); } catch { /* abaikan */ } }
+const notifTag = (id) => 'msg-' + String(id).replace(/[^0-9a-zA-Z-]/g, '').slice(0, 40);
+// Notifikasi dalam-aplikasi (cadangan Web Push). Tag sama dengan notifikasi service worker, jadi keduanya saling menggantikan (tidak dobel).
+function notify(convId, title, body) {
+  const c = convs.find((x) => x.conv_id === convId); if (c && isMuted(c)) return;
+  if (c && c.locked) { title = 'ORVIX'; body = 'Pesan baru'; }
+  if (!document.hidden) { if (convId !== activeId) toast(`${title}: ${String(body || '').slice(0, 80)}`); return; }
+  if ((localStorage.getItem('orvix_notif') === '1' || pushActiveLocal(me.id)) && 'Notification' in window && Notification.permission === 'granted') {
+    try { const n = new Notification(title, { body: String(body || '').slice(0, 120), icon: '/assets/icon-192.png', badge: '/assets/badge-96.png', tag: notifTag(convId) }); n.onclick = () => { focus(); n.close(); openConv(convId); }; } catch { /* abaikan */ }
+  }
 }
 async function onInsert({ new: m }) {
   if (m.sender_id !== me.id && m.message_type !== 'system') markDelivered(m.conversation_id);   // pesan sudah sampai di perangkat ini
   if (m.conversation_id === activeId) {
-    if (!msgs.some((x) => x.id === m.id)) { await ensureProfiles([m.sender_id]); msgs.push(m); msgs.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)); render('auto'); }
-    if (m.sender_id !== me.id) { markRead(); if (m.story_id) loadStoryRefs(); if (document.hidden && m.message_type !== 'system') notify(convName(curConv() || {}), m.content); }
-  } else if (m.sender_id !== me.id) {
-    const c = convs.find((x) => x.conv_id === m.conversation_id); notify(c ? convName(c) : 'Pesan baru', m.content);
+    const near = atBottom();
+    if (!msgs.some((x) => x.id === m.id)) { await ensureProfiles([m.sender_id]); msgs.push(m); msgs.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)); if (!near && m.sender_id !== me.id && m.message_type !== 'system') newBelow++; render('auto'); if (m.reply_to) loadReplyRefs(); }
+    if (m.sender_id !== me.id) { typers.delete(m.sender_id); paintSub(); markRead(); if (m.story_id) loadStoryRefs(); if (document.hidden && m.message_type !== 'system') notify(m.conversation_id, convName(curConv() || {}), m.content); }
+  } else if (m.sender_id !== me.id && m.message_type !== 'system') {
+    const c = convs.find((x) => x.conv_id === m.conversation_id); if (c?.conv_type === 'channel') { refreshList(); return; } notify(m.conversation_id, c ? convName(c) : 'Pesan baru', m.content);
   }
   refreshList();
 }
 function onUpdate({ new: m }) { if (m.conversation_id === activeId) applyUpdate(m); refreshList(); }
+function onReact({ eventType, new: n, old: o }) {
+  const r = eventType === 'DELETE' ? o : n; if (!r || !r.message_id) return;
+  if (!msgs.some((m) => m.id === r.message_id)) return;
+  setRx(r.message_id, r.user_id, eventType === 'DELETE' ? null : r.emoji); render('auto');
+}
+track(sb.channel('rx-' + me.id).on('postgres_changes', { event: '*', schema: 'public', table: 'orvix_msg_reactions' }, onReact).subscribe());
 const refreshReq = debounce(async () => {
   try { const fr = await fetchFriendships(me.id); const n = fr.filter((f) => f.status === 'pending' && f.incoming).length; const b = $('#reqN'); b.textContent = n; b.classList.toggle('hide', !n); } catch { /* abaikan */ }
 }, 300);
@@ -443,7 +526,7 @@ track(sb.channel('inbox-' + me.id)
 /* ---------- menu percakapan ---------- */
 function convMenu() {
   const c = curConv() || {}, grp = c.conv_type === 'group';
-  const m = openModal({ title: grp ? 'Grup' : 'Percakapan', sheet: true, html: `<div class="col"><button class="btn" data-a="info">${icon('user')} ${grp ? 'Anggota grup' : 'Lihat profil'}</button><button class="btn" data-a="dis">${icon('timer')} Pesan sementara <span class="dim" style="margin-left:auto">${DIS[disSecs || 0]}</span></button>${grp ? `<button class="btn" data-a="share">${icon('link')} Bagikan link grup</button><button class="btn danger" data-a="leave">${icon('logout')} Keluar grup</button>` : `<button class="btn" data-a="report">${icon('flag')} Laporkan</button>${blocked.has(c.other_id) ? `<button class="btn" data-a="unblock">${icon('unlock')} Buka blokir</button>` : `<button class="btn danger" data-a="block">${icon('ban')} Blokir</button>`}`}<button class="btn" data-a="search">${icon('search')} Cari pesan</button><button class="btn" data-a="sched">${icon('clock')} ${isPremium(me) ? 'Jadwalkan pesan' : 'Pesan terjadwal'} ${isPremium(me) ? '' : '<span class="pill prem" style="margin-left:auto">Premium</span>'}</button><button class="btn" data-a="export">${icon('download')} Ekspor chat ${isPremium(me) ? '' : '<span class="pill prem" style="margin-left:auto">Premium</span>'}</button></div>` });
+  const m = openModal({ title: grp ? 'Grup' : 'Percakapan', sheet: true, html: `<div class="col"><button class="btn" data-a="info">${icon('user')} ${grp ? 'Anggota grup' : 'Lihat profil'}</button><button class="btn" data-a="dis">${icon('timer')} Pesan sementara <span class="dim" style="margin-left:auto">${DIS[disSecs || 0]}</span></button>${grp ? `<button class="btn" data-a="share">${icon('link')} Bagikan link grup</button><button class="btn danger" data-a="leave">${icon('logout')} Keluar grup</button>` : `<button class="btn" data-a="report">${icon('flag')} Laporkan</button>${blocked.has(c.other_id) ? `<button class="btn" data-a="unblock">${icon('unlock')} Buka blokir</button>` : `<button class="btn danger" data-a="block">${icon('ban')} Blokir</button>`}`}<button class="btn" data-a="mute">${icon(isMuted(c) ? 'bell' : 'mutebell')} ${isMuted(c) ? 'Bunyikan notifikasi' : 'Bisukan notifikasi'}</button><button class="btn" data-a="lock">${icon(c.locked ? 'unlock' : 'lock')} ${c.locked ? 'Buka kunci chat' : 'Kunci chat'}</button><button class="btn" data-a="arch">${icon('archive')} ${c.archived ? 'Keluarkan dari arsip' : 'Arsipkan chat'}</button><button class="btn" data-a="unread">${icon('unread')} Tandai belum dibaca</button><button class="btn" data-a="stars">${icon('star')} Pesan berbintang</button><button class="btn" data-a="search">${icon('search')} Cari pesan</button><button class="btn" data-a="sched">${icon('clock')} ${isPremium(me) ? 'Jadwalkan pesan' : 'Pesan terjadwal'} ${isPremium(me) ? '' : '<span class="pill prem" style="margin-left:auto">Premium</span>'}</button><button class="btn" data-a="export">${icon('download')} Ekspor chat ${isPremium(me) ? '' : '<span class="pill prem" style="margin-left:auto">Premium</span>'}</button></div>` });
   m.el.onclick = async (e) => {
     const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return; m.close();
     if (a === 'info') showInfo();
@@ -453,6 +536,11 @@ function convMenu() {
     if (a === 'block') blockCurrent(c);
     if (a === 'unblock') unblockCurrent(c);
     if (a === 'search') searchHere(false);
+    if (a === 'stars') openStarred();
+    if (a === 'mute') { const u = await mutePicker(isMuted(c)); if (u !== undefined && await prefCall('orvix_mute_conversations', { convs: [c.conv_id], p_until: u }, u ? 'Notifikasi dibisukan' : 'Notifikasi dibunyikan')) paintSub(); }
+    if (a === 'lock') { if (!(await ensureUnlocked(me))) return; const on = !c.locked; if (await prefCall('orvix_lock_conversations', { convs: [c.conv_id], p_on: on }, on ? 'Chat dikunci. Buka lewat folder Chat terkunci.' : 'Kunci dibuka') && on) { if (history.state?.c) history.back(); else closeConv(); } }
+    if (a === 'arch') { const on = !c.archived; if (await prefCall('orvix_archive_conversations', { convs: [c.conv_id], p_on: on }, on ? 'Chat diarsipkan' : 'Dikeluarkan dari arsip') && on) { if (history.state?.c) history.back(); else closeConv(); } }
+    if (a === 'unread') { if (await prefCall('orvix_mark_unread', { convs: [c.conv_id], flag: true }, 'Ditandai belum dibaca')) { if (history.state?.c) history.back(); else closeConv(); } }
     if (a === 'sched') isPremium(me) ? scheduleHere($('#ci')?.value.trim() || '') : premiumInfo('Pesan terjadwal');
     if (a === 'export') exportChat(c);
     if (a === 'leave') leaveCurrent(c);
@@ -670,9 +758,153 @@ function groupModal(fr) {
   };
 }
 $('#fab').onclick = () => {
-  const m = openModal({ title: 'Mulai', sheet: true, html: `<div class="col"><button class="btn" data-a="add">${icon('userplus')} Tambah teman dengan ID</button><button class="btn" data-a="contacts">${icon('contacts')} Kontak</button><button class="btn" data-a="friends">${icon('users')} Pilih dari teman / grup baru</button><button class="btn" data-a="gsearch">${icon('search')} Cari pesan</button><button class="btn" data-a="glist">${icon('clock')} Pesan terjadwal ${isPremium(me) ? '' : '<span class="pill prem" style="margin-left:auto">Premium</span>'}</button></div>` });
-  m.el.onclick = (e) => { const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return; m.close(); a === 'add' ? addFriendModal() : a === 'contacts' ? contactsModal() : a === 'gsearch' ? searchHere(true) : a === 'glist' ? openScheduledList({ me, titleOf }) : friendsModal(); };
+  const m = openModal({ title: 'Mulai', sheet: true, html: `<div class="col"><button class="btn" data-a="add">${icon('userplus')} Tambah teman dengan ID</button><button class="btn" data-a="contacts">${icon('contacts')} Kontak</button><button class="btn" data-a="friends">${icon('users')} Pilih dari teman / grup baru</button><button class="btn" data-a="gsearch">${icon('search')} Cari pesan</button><button class="btn" data-a="stars">${icon('star')} Pesan berbintang</button><button class="btn" data-a="glist">${icon('clock')} Pesan terjadwal ${isPremium(me) ? '' : '<span class="pill prem" style="margin-left:auto">Premium</span>'}</button></div>` });
+  m.el.onclick = (e) => { const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return; m.close(); a === 'add' ? addFriendModal() : a === 'contacts' ? contactsModal() : a === 'gsearch' ? searchHere(true) : a === 'stars' ? openStarred() : a === 'glist' ? openScheduledList({ me, titleOf }) : friendsModal(); };
 };
+
+/* ---------- fitur chat: balas, reaksi, bintang, teruskan, suara, mengetik ---------- */
+const nameOf = (id) => (id === me.id ? 'Kamu' : prof.get(id)?.display_name || 'Anggota');
+const snippet = (m) => (m.media_type === 'audio' ? '🎤 Pesan suara' : m.media_type === 'image' ? '📷 Foto' : m.media_type === 'video' ? '🎥 Video' : m.content);
+const rxLoaded = new Set();
+
+function replyQuote(m) {
+  if (!m.reply_to) return '';
+  const o = msgs.find((x) => x.id === m.reply_to) || replyCache.get(m.reply_to);
+  if (o === undefined) return `<div class="rq"><span class="grow"><b>Membalas</b><small>Memuat…</small></span></div>`;
+  if (!o || o.deleted_at) return `<div class="rq off"><span class="grow"><b>Pesan</b><small class="ell">${icon('ban', 12)} Pesan ini telah dihapus</small></span></div>`;
+  return `<div class="rq${o.sender_id === me.id ? ' mine' : ''}" data-rq="${o.id}"><span class="grow"><b>${esc(nameOf(o.sender_id))}</b><small class="ell">${esc(snippet(o))}</small></span></div>`;
+}
+async function loadReplyRefs() {
+  const need = [...new Set(msgs.map((m) => m.reply_to).filter((i) => i && !msgs.some((x) => x.id === i) && !replyCache.has(i)))]; if (!need.length) return;
+  const { data } = await sb.from('messages').select('id,sender_id,content,message_type,media_type,deleted_at').in('id', need.slice(0, 60));
+  const got = new Map((data || []).map((r) => [r.id, r])); need.forEach((i) => replyCache.set(i, got.get(i) || null));
+  await ensureProfiles([...got.values()].map((r) => r.sender_id)); render('auto');
+}
+function startReply(m) { if (!m || m._st) return; replyTo = m; paintReply(); $('#ci')?.focus({ preventScroll: true }); }
+function clearReply() { replyTo = null; paintReply(); }
+function paintReply() {
+  const b = $('#replyBar'); if (!b) return;
+  if (!replyTo) { b.classList.add('hide'); b.innerHTML = ''; return; }
+  b.classList.remove('hide'); b.innerHTML = `<span class="rb-bar"></span><span class="grow"><b>Membalas ${esc(nameOf(replyTo.sender_id))}</b><small class="ell">${esc(snippet(replyTo))}</small></span><button class="ibtn" id="rbX" aria-label="Batalkan balasan">${icon('x', 18)}</button>`;
+  $('#rbX').onclick = clearReply;
+}
+async function jumpTo(id) {
+  for (let i = 0; i < 8 && !msgs.some((m) => m.id === id) && hasMore; i++) { try { await loadMsgs(activeId, true); } catch { break; } }
+  loadExtras(activeId);
+  const el = $(`#msgs [data-m="${CSS.escape(id)}"]`); if (!el) return toast('Pesan asli tidak ditemukan di riwayat chat ini.');
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1900);
+}
+function setRx(mid, uid, emoji) { const m = reacts.get(mid) || new Map(); emoji ? m.set(uid, emoji) : m.delete(uid); m.size ? reacts.set(mid, m) : reacts.delete(mid); }
+async function loadExtras(id) {
+  const ids = msgs.filter((m) => !m._st && !m.deleted_at && !rxLoaded.has(m.id)).map((m) => m.id).slice(-300);
+  for (let i = 0; i < ids.length; i += 60) {
+    const part = ids.slice(i, i + 60);
+    const [r1, r2] = await Promise.all([sb.from('orvix_msg_reactions').select('message_id,user_id,emoji').in('message_id', part), sb.from('orvix_msg_starred').select('message_id').in('message_id', part)]);
+    if (activeId !== id) return;
+    if (!r1.error) { part.forEach((x) => rxLoaded.add(x)); (r1.data || []).forEach((r) => setRx(r.message_id, r.user_id, r.emoji)); }
+    if (!r2.error) (r2.data || []).forEach((r) => starred.add(r.message_id));
+  }
+  await loadReplyRefs(); if (activeId === id) render('auto');
+}
+async function react(m, emoji) {
+  const prev = reacts.get(m.id)?.get(me.id) || null, next = prev === emoji ? null : emoji;
+  setRx(m.id, me.id, next); render('auto');
+  const { error } = await sb.rpc('orvix_msg_react', { msg: m.id, emo: next });
+  if (error) { setRx(m.id, me.id, prev); render('auto'); toast(dbErr(error, '17a-fitur-chat.sql'), 'error'); }
+}
+function reactionsModal(m) {
+  const rx = reacts.get(m.id); if (!rx || !rx.size) return;
+  ensureProfiles([...rx.keys()]).then(() => {
+    const mm = openModal({ title: 'Reaksi', sheet: true, html: `<div class="col" style="gap:6px">${[...rx].map(([u, e]) => `<button class="row gap rxrow" data-u="${u}">${u === me.id ? avatar(me.display_name, me.avatar_url, 36) : avatar(prof.get(u)?.display_name, prof.get(u)?.avatar_url, 36)}<span class="grow" style="text-align:left">${esc(nameOf(u))}${u === me.id ? '<small class="dim" style="display:block">Ketuk untuk menghapus</small>' : ''}</span><span style="font-size:1.4rem">${esc(e)}</span></button>`).join('')}</div>` });
+    mm.el.onclick = (e) => { const b = e.target.closest('[data-u]'); if (b && b.dataset.u === me.id) { mm.close(); react(m, rx.get(me.id)); } };
+  });
+}
+async function starMsgs(rows, on) {
+  const ids = rows.filter((m) => !m._st).map((m) => m.id); if (!ids.length) return;
+  const { error } = await sb.rpc('orvix_msg_star', { msgs: ids, star: on }); if (error) return toast(dbErr(error, '17a-fitur-chat.sql'), 'error');
+  ids.forEach((i) => (on ? starred.add(i) : starred.delete(i))); render('auto'); toast(on ? 'Pesan diberi bintang' : 'Bintang dilepas', 'success');
+}
+const openStarred = () => starredModal({ me, ensureProfiles, prof, titleOf, onOpen: async (cid, mid) => { if (cid !== activeId) await openConv(cid); jumpTo(mid); } });
+
+async function forwardMsgs(rows) {
+  rows = rows.filter((m) => !m._st && !m.deleted_at && m.message_type !== 'system').sort((a, b) => new Date(a.created_at) - new Date(b.created_at)); if (!rows.length) return;
+  const ids = await forwardPicker({ convs: convs.filter((c) => !c.locked), name: convName, avOf: (c) => (c.conv_type === 'group' ? `<span class="av" style="width:36px;height:36px">${icon('users', 18)}</span>` : avatar(convName(c), c.other_avatar, 36)) });
+  if (!ids.length) return; toast('Meneruskan…'); let ok = 0, fail = 0, why = '';
+  for (const cid of ids) for (const m of rows) {
+    try {
+      let row = { conversation_id: cid, sender_id: me.id, content: m.content, message_type: m.message_type, forwarded: true };
+      if (m.media_path) {
+        const dest = `${cid}/${me.id}/${crypto.randomUUID()}.${m.media_path.split('.').pop()}`, { error: ce } = await sb.storage.from('chat-media').copy(m.media_path, dest); if (ce) throw ce;
+        row = { ...row, media_type: m.media_type, media_path: dest }; if (m.duration_ms) row.duration_ms = m.duration_ms; if (m.wave) row.wave = m.wave;
+      }
+      const { error } = await sb.from('messages').insert(row); if (error) { if (row.media_path) sb.storage.from('chat-media').remove([row.media_path]).catch(() => {}); throw error; } ok++;
+    } catch (e) { fail++; why = sendErr(e); }
+  }
+  refreshList();
+  if (!fail) return toast(ids.length > 1 ? `Diteruskan ke ${ids.length} chat` : 'Pesan diteruskan', 'success');
+  toast(ok ? `${ok} terkirim, ${fail} gagal. ${why}` : `Gagal meneruskan. ${why}`, 'error');
+}
+
+/* kolom ketik: emoji + pesan suara */
+function bindComposerX(ci) {
+  $('#emoBtn').onclick = (e) => { emojiPicker({ anchor: e.currentTarget, onPick: (em) => { const a = ci.selectionStart ?? ci.value.length, b = ci.selectionEnd ?? a; ci.value = ci.value.slice(0, a) + em + ci.value.slice(b); ci.selectionStart = ci.selectionEnd = a + em.length; ci.dispatchEvent(new Event('input')); ci.focus(); } }); };
+  $('#micBtn').onclick = startRec; $('#recCancel').onclick = cancelRec; $('#recSend').onclick = sendRec;
+  $('#recPause').onclick = () => { if (!rec) return; const b = $('#recPause'); if (rec.state === 'rec') { rec.pause(); b.innerHTML = icon('mic'); b.setAttribute('aria-label', 'Lanjutkan rekaman'); $('#cf').classList.add('paused'); } else { rec.resume(); b.innerHTML = icon('pause'); b.setAttribute('aria-label', 'Jeda rekaman'); $('#cf').classList.remove('paused'); } };
+}
+const lvBuf = [];
+function paintLevel(l) {
+  const box = $('#recLv'); if (!box) return; lvBuf.push(l); if (lvBuf.length > 26) lvBuf.shift();
+  if (box.childElementCount !== 26) box.innerHTML = '<i></i>'.repeat(26); [...box.children].forEach((n, i) => { const v = lvBuf[lvBuf.length - 26 + i] ?? 0; n.style.height = 12 + Math.min(1, v * 2.2) * 88 + '%'; });
+}
+async function startRec() {
+  if (rec || !activeId) return; const r = new Recorder(paintLevel); rec = r;
+  try { await r.start(); } catch (e) { rec = null; return toast(e && (e.name === 'NotAllowedError' || e.name === 'SecurityError') ? 'Izin mikrofon ditolak. Aktifkan lewat pengaturan situs, lalu coba lagi.' : e && e.name === 'NotFoundError' ? 'Mikrofon tidak ditemukan.' : 'Mikrofon tidak bisa dipakai.', 'error'); }
+  if (rec !== r) { r.cancel(); return; }
+  lvBuf.length = 0; $('#cf').classList.add('recording'); $('#cf').classList.remove('paused'); $('#recPause').innerHTML = icon('pause'); $('#recT').textContent = '0:00'; navigator.vibrate?.(15);
+  clearInterval(recT); recT = setInterval(() => { if (!rec) return clearInterval(recT); const t = $('#recT'); if (t) t.textContent = fmtDur(rec.elapsed); if (rec.elapsed >= 600000) sendRec(); }, 200);
+}
+function cancelRec() { if (rec) { rec.cancel(); rec = null; } clearInterval(recT); $('#cf')?.classList.remove('recording', 'paused'); }
+async function sendRec() {
+  if (!rec) return; const r = rec, cid = activeId; rec = null; clearInterval(recT); $('#cf')?.classList.remove('recording', 'paused');
+  const out = await r.stop(); if (!out) return; if (out.duration_ms < 800) return toast('Rekaman terlalu singkat. Tahan lebih lama.', 'error');
+  const rp = replyTo ? replyTo.id : null; clearReply();
+  const tmp = { id: 'tmp-' + ++seq, conversation_id: cid, sender_id: me.id, content: 'Mengirim pesan suara…', created_at: new Date().toISOString(), _st: 'sending', reply_to: rp };
+  if (cid === activeId) { msgs.push(tmp); render('bottom'); }
+  try {
+    const row = await sendMessage({ conv: cid, me: me.id, audio: out, replyTo: rp });
+    if (cid !== activeId) return refreshList();
+    msgs = msgs.filter((m) => m !== tmp); if (!msgs.some((x) => x.id === row.id)) msgs.push(row); msgs.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)); render('bottom'); refreshList();
+  } catch (e) { msgs = msgs.filter((m) => m !== tmp); render('auto'); toast(sendErr(e), 'error'); }
+}
+
+/* sedang mengetik (Realtime Broadcast; bila Broadcast dibatasi, fitur ini diam saja) */
+function subscribeTyping(id) {
+  closeTyping();
+  try {
+    typingCh = track(sb.channel('typing-' + id, { config: { broadcast: { self: false } } }));
+    typingCh.on('broadcast', { event: 'typing' }, ({ payload }) => { if (!payload || payload.u === me.id || id !== activeId) return; typers.set(payload.u, Date.now() + 4000); paintSub(); setTimeout(paintSub, 4200); }).subscribe();
+  } catch { typingCh = null; }
+}
+function closeTyping() { const c = typingCh; typingCh = null; typers.clear(); if (c) untrack(c); }
+function sendTyping() { if (!typingCh || typingCh.state !== 'joined' || Date.now() - typingT < 2500) return; typingT = Date.now(); typingCh.send({ type: 'broadcast', event: 'typing', payload: { u: me.id } }).catch(() => {}); }
+const stopTypingNow = () => { typingT = 0; };
+
+/* geser pesan ke kanan = balas */
+function bindSwipeReply(box) {
+  let el = null, x0 = 0, y0 = 0, dx = 0, on = false;
+  box.addEventListener('touchstart', (e) => { const it = e.target.closest('.msg[data-m]'); if (!it || msel.size || e.touches.length !== 1 || e.target.closest('.vn,video,button')) { el = null; return; } el = it; x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; dx = 0; on = false; }, { passive: true });
+  box.addEventListener('touchmove', (e) => {
+    if (!el) return; const t = e.touches[0], ddx = t.clientX - x0, ddy = t.clientY - y0;
+    if (!on) { if (Math.abs(ddy) > 12 && Math.abs(ddy) > Math.abs(ddx)) { el = null; return; } if (ddx > 12) on = true; else return; }
+    dx = Math.max(0, Math.min(72, ddx)); el.style.transform = `translateX(${dx}px)`; el.classList.toggle('swp', dx >= 56); clearTimeout(mlpT);
+  }, { passive: true });
+  const end = () => { if (!el) return; const m = msgs.find((x) => x.id === el.dataset.m), fire = dx >= 56; el.style.transform = ''; el.classList.remove('swp'); if (fire && m && selectable(m)) { navigator.vibrate?.(10); startReply(m); mlpFired = true; setTimeout(() => { mlpFired = false; }, 500); } el = null; dx = 0; };
+  box.addEventListener('touchend', end); box.addEventListener('touchcancel', end);
+}
+function paintToBottom() {
+  const b = $('#toBottom'); if (!b) return; const el = $('#msgs'), far = !!el && el.scrollHeight - el.scrollTop - el.clientHeight > 320;
+  if (!far) newBelow = 0; b.classList.toggle('hide', !far); const n = $('#tbN'); if (n) { n.textContent = newBelow > 99 ? '99+' : newBelow; n.classList.toggle('hide', !newBelow); }
+}
 
 closeConv(); layout.classList.remove('open');
 await Promise.all([loadConvs(), loadBlocked().catch(() => {})]); refreshReq();
@@ -683,4 +915,4 @@ await Promise.all([loadConvs(), loadBlocked().catch(() => {})]); refreshReq();
   m.el.querySelector('[data-ok]').onclick = m.close;
 })().catch(() => {});
 if (new URLSearchParams(location.search).get('req') === '1') setTimeout(() => requestsModal(), 400);   // dari notifikasi permintaan pertemanan
-const deep = new URLSearchParams(location.search).get('c'); if (deep && convs.some((c) => c.conv_id === deep)) openConv(deep, false);
+const deep = new URLSearchParams(location.search).get('c'); if (deep && convs.some((c) => c.conv_id === deep)) openConv(deep, false).catch(() => {});
