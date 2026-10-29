@@ -161,3 +161,10 @@ Gejala Diagnosa: "Tidak terjangkau dari browser: Failed to fetch", "Ekstensi pg_
 ## 19. Centang pesan seperti WhatsApp
 - Jam = menunggu koneksi pengirim (teks dikirim otomatis saat online lagi). Satu centang = tersimpan di server. Dua abu-abu = perangkat penerima menerima (aplikasi terbuka, atau push tiba lewat service worker, RPC `push_ack`). Dua biru = sudah dibaca.
 - Jalankan `sql-parts/18c-centang-diterima.sql`, deploy ulang `push-send` dan frontend.
+
+## 12. Popup profil dari ID & info grup (sql-parts 19a, 19b)
+Jalankan berurutan, satu file per Run (idempotent): `19a-profil-popup.sql` → `19b-grup-admin.sql` (butuh 12a, 12c, 12h, 12i, 13a, 13d, 17a sudah dijalankan). Lalu deploy ulang frontend dan tutup tab lama. Tanpa env/secret baru.
+- **ID di pesan**: 8 angka berdiri sendiri atau `@username` jadi tautan (dilewati: URL, email, `kode`, nomor telepon/harga). Ketuk membuka popup lewat RPC `orvix_lookup_profile` (rate limit 30/menit; pesan sama untuk tidak ada / diblokir / dinonaktifkan).
+- **Satu komponen** `js/profilecard.js` dipakai di: ID di pesan, nama pengirim di grup, anggota grup, hasil cari ID, daftar teman/kontak, header chat pribadi.
+- **Info grup** `js/groupinfo.js`: tab Anggota/Pengaturan, peran owner/admin/member, tambah/keluarkan/jadikan admin, izin kirim pesan & edit info, riwayat perubahan anggota, hapus grup (khusus pemilik). Semua validasi di RPC `orvix_group_*` (SECURITY DEFINER), bukan di frontend.
+- `leave_group` kini mengalihkan kepemilikan otomatis bila pemilik keluar.
