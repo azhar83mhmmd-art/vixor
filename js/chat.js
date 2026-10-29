@@ -8,6 +8,8 @@ import { ensureUnlocked, isUnlocked, unlockSession, onRelock, lockSession, hasPi
 import { shareInvite } from './share.js';
 import { draftBind, draftClear, openScheduleModal, openScheduledList, openSearch, premiumInfo } from './advmsg.js';
 import { startCall, joinCall, activeSession, openCalls, bus as callBus } from './calls-core.js';
+import { initProfileCards, bindProfileTriggers, linkifyIds, openProfileCard } from './profilecard.js';
+import { initGroupInfo, openGroupInfo } from './groupinfo.js';
 import { $, $$, esc, icon, avatar, nameWithBadge, verifiedBadge, fmtTime, fmtDay, listTime, relTime, toast, setBusy, openModal, confirmDialog, copyText, debounce, mountShell, profileScreen, isPremium } from './utils.js';
 
 const { profile: me } = await requireAuth({ shell: '/chat' });
@@ -227,7 +229,7 @@ function closeConv() {
 addEventListener('popstate', () => {
   if (skipPop) { skipPop = false; return; }
   if (msel.size) { selPushed = false; exitMsel(true); return; }   // tombol Kembali saat memilih pesan hanya membatalkan pilihan
-  if (activeId && !document.querySelector('.pscreen')) closeConv();
+  if (activeId && !document.querySelector('.pscreen,.pc-back')) closeConv();
 });
 
 async function loadMsgs(id, older = false) {
@@ -304,7 +306,7 @@ function render(mode = 'auto') {
     const who = grp && !mine ? `<div class="who">${esc(prof.get(m.sender_id)?.display_name || 'Anggota')}</div>` : '';
     const picked = msel.has(m.id);
     const rx = reacts.get(m.id), rxHTML = rx && rx.size ? `<span class="rxs">${[...[...rx.values()].reduce((a, e) => a.set(e, (a.get(e) || 0) + 1), new Map())].map(([e, n]) => `<button type="button" class="rx${rx.get(me.id) === e ? ' mine' : ''}" data-rx="${esc(e)}" data-rm="${m.id}" aria-label="Reaksi ${esc(e)} ${n}">${esc(e)}${n > 1 ? `<i>${n}</i>` : ''}</button>`).join('')}</span>` : '';
-    html += `<div class="msg ${mine ? 'out' : 'in'} ${m._st || ''}${picked ? ' sel' : ''}${m.media_type === 'audio' ? ' vn-msg' : ''}${rxHTML ? ' has-rx' : ''}" data-m="${m.id}"${msel.size ? ` role="checkbox" aria-checked="${picked}"` : ''}>${who}${m.forwarded ? `<span class="fwd-l">${icon('forward', 12)} Diteruskan</span>` : ''}${replyQuote(m)}${quoteHTML(m)}${mediaHTML(m)}${isPlaceholder(m) ? '' : esc(m.content)}<span class="meta">${starred.has(m.id) ? `<span class="m-star">${icon('star', 11)}</span>` : ''}${m.expires_at ? icon('timer', 12) + ' ' : ''}${fmtTime(m.created_at)}${m.edited_at ? ' · diedit' : ''}${mine ? tickHTML(m) : ''}${m._st === 'failed' ? ' · gagal' : ''}${m._st === 'failed' ? ` <button class="btn sm" data-retry="${m.id}" style="min-height:26px;padding:0 10px">Coba lagi</button>` : ''}</span>${rxHTML}</div>`;
+    html += `<div class="msg ${mine ? 'out' : 'in'} ${m._st || ''}${picked ? ' sel' : ''}${m.media_type === 'audio' ? ' vn-msg' : ''}${rxHTML ? ' has-rx' : ''}" data-m="${m.id}"${msel.size ? ` role="checkbox" aria-checked="${picked}"` : ''}>${who}${m.forwarded ? `<span class="fwd-l">${icon('forward', 12)} Diteruskan</span>` : ''}${replyQuote(m)}${quoteHTML(m)}${mediaHTML(m)}${isPlaceholder(m) ? '' : linkifyIds(m.content)}<span class="meta">${starred.has(m.id) ? `<span class="m-star">${icon('star', 11)}</span>` : ''}${m.expires_at ? icon('timer', 12) + ' ' : ''}${fmtTime(m.created_at)}${m.edited_at ? ' · diedit' : ''}${mine ? tickHTML(m) : ''}${m._st === 'failed' ? ' · gagal' : ''}${m._st === 'failed' ? ` <button class="btn sm" data-retry="${m.id}" style="min-height:26px;padding:0 10px">Coba lagi</button>` : ''}</span>${rxHTML}</div>`;
   });
   el.innerHTML = html; syncVoice(el); hydrate(el).then(() => { syncVoice(el); if (mode === 'bottom' || near) el.scrollTop = el.scrollHeight; }); paintToBottom();
   if (mode === 'bottom' || (mode === 'auto' && near)) el.scrollTop = el.scrollHeight; else if (mode === 'keep') el.scrollTop = el.scrollHeight - prevH;
@@ -596,6 +598,11 @@ async function leaveCurrent(c, done) {
 const joinedText = (d) => (d ? new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(new Date(d)) : '');
 async function showInfo() {
   const c = curConv(); if (!c) return;
+  if (c.conv_type === 'group') return openGroupInfo(c);
+  return showDmInfo();          // profil langsung = layar penuh (popup hanya untuk ID yang diketuk di pesan)
+}
+async function showDmInfo() {
+  const c = curConv(); if (!c) return;
   if (c.conv_type === 'group') {
     const { data } = await sb.from('conversation_members').select('user_id,role').eq('conversation_id', c.conv_id); await ensureProfiles((data || []).map((d) => d.user_id));
     const mem = (data || []).map((d) => { const p = prof.get(d.user_id) || {}; return { id: d.user_id, name: p.display_name || 'Anggota', avatar: p.avatar_url, verified: p.is_verified, username: p.username, owner: d.role === 'owner' }; }).sort((a, b) => b.owner - a.owner);
@@ -654,7 +661,7 @@ function addFriendModal(prefill = '') {
     const chatBtn = open ? '<button class="btn sm" data-chat>Chat</button>' : '';
     const act = { self: '<span class="dim">Ini ID kamu</span>', friend: '<button class="btn sm primary" data-chat>Chat</button>', pending_out: chatBtn + '<span class="dim">Permintaan terkirim</span>', pending_in: chatBtn + '<button class="btn sm primary" data-acc>Terima</button>', none: chatBtn + '<button class="btn sm primary" data-req>Tambah teman</button>' }[u.relation];
     const note = ['none', 'pending_out', 'pending_in'].includes(u.relation) && !open ? '<p class="hint" style="margin-top:10px">Pengguna ini hanya menerima chat dari teman. Kirim permintaan pertemanan; chat bisa dimulai setelah diterima.</p>' : '';
-    res.innerHTML = `<div class="card row gap">${avatar(u.display_name, u.avatar_url, 48)}<span class="grow">${nameWithBadge(u.display_name, u.is_verified, 15, true, u.id)}<br><span class="dim">@${esc(u.username)}</span></span>${act}</div>${note}`;
+    res.innerHTML = `<div class="card row gap"><span class="row gap grow" style="min-width:0">${avatar(u.display_name, u.avatar_url, 48)}<span class="grow">${nameWithBadge(u.display_name, u.is_verified, 15, true, u.id)}<br><span class="dim">@${esc(u.username)}</span></span></span>${act}</div>${note}`;
     $('[data-req]', res)?.addEventListener('click', async (e) => { setBusy(e.currentTarget, true); const { error: er } = await sb.rpc('send_friend_request', { target: u.id }); if (er) { setBusy(e.currentTarget, false); return toast(errMsg(er), 'error'); } toast('Permintaan terkirim', 'success'); search(); });
     $('[data-acc]', res)?.addEventListener('click', async () => { const fr = (await fetchFriendships(me.id)).find((f) => f.other.id === u.id); if (fr) { await sb.rpc('respond_friend_request', { fid: fr.id, accept: true }); toast('Kalian sekarang berteman', 'success'); search(); } });
     $('[data-chat]', res)?.addEventListener('click', () => startChat(u.id, [m]));
@@ -753,9 +760,9 @@ async function contactsModal() {
   load();
 }
 
-function groupModal(fr) {
+function groupModal(fr, pre = []) {
   if (!fr.length) return toast('Tambahkan teman terlebih dahulu', 'error');
-  const m = openModal({ title: 'Grup baru', html: `<div class="field"><label for="gt">Nama grup</label><input class="inp" id="gt" maxlength="60"></div><p class="sec" style="margin:0 0 6px">Pilih anggota</p><div class="col" style="gap:4px;max-height:240px;overflow:auto;margin-bottom:14px">${fr.map((f) => `<label class="row gap" style="padding:6px 2px"><input type="checkbox" value="${f.other.id}" style="width:20px;height:20px;accent-color:#1769FF">${avatar(f.other.display_name, f.other.avatar_url, 34)}<span class="ell">${esc(f.other.display_name)}</span></label>`).join('')}</div><p class="err" id="ge"></p><button class="btn primary block" id="gc">Buat grup</button>` });
+  const m = openModal({ title: 'Grup baru', html: `<div class="field"><label for="gt">Nama grup</label><input class="inp" id="gt" maxlength="60"></div><p class="sec" style="margin:0 0 6px">Pilih anggota</p><div class="col" style="gap:4px;max-height:240px;overflow:auto;margin-bottom:14px">${fr.map((f) => `<label class="row gap" style="padding:6px 2px"><input type="checkbox" value="${f.other.id}" ${pre.includes(f.other.id) ? 'checked' : ''} style="width:20px;height:20px;accent-color:#1769FF">${avatar(f.other.display_name, f.other.avatar_url, 34)}<span class="ell">${esc(f.other.display_name)}</span></label>`).join('')}</div><p class="err" id="ge"></p><button class="btn primary block" id="gc">Buat grup</button>` });
   $('#gc', m.el).onclick = async (e) => {
     const title = $('#gt', m.el).value.trim(), ids = $$('input[type=checkbox]:checked', m.el).map((x) => x.value), er = $('#ge', m.el);
     if (!title) return (er.textContent = 'Isi nama grup.'); if (!ids.length) return (er.textContent = 'Pilih minimal 1 anggota.');
@@ -923,3 +930,33 @@ await Promise.all([loadConvs(), loadBlocked().catch(() => {})]); refreshReq();
 })().catch(() => {});
 if (new URLSearchParams(location.search).get('req') === '1') setTimeout(() => requestsModal(), 400);   // dari notifikasi permintaan pertemanan
 const deep = new URLSearchParams(location.search).get('c'); if (deep && convs.some((c) => c.conv_id === deep)) openConv(deep, false).catch(() => {});
+
+/* ---------- popup profil bersama & info grup (sql-parts/19a, 19b) ---------- */
+const directOpen = async (uid) => { const { data, error } = await sb.rpc('start_direct_chat', { target: uid }); if (error) throw error; return data; };
+function openUserFull(d) {
+  profileScreen({ name: d.display_name, username: d.username, orvixId: d.orvix_id, avatarUrl: d.avatar_url, bannerUrl: d.banner_url, verified: d.is_verified, userId: d.id, bio: d.bio, seen: d.last_seen_at ? lastSeenText(d.last_seen_at) : '', actions: [
+    ...(d.relation === 'self' ? [] : [{ label: 'Chat', icon: 'chat', run: (close) => { close(); setTimeout(async () => { try { const cid = await directOpen(d.id); await loadConvs(); openConv(cid); saveContact(d.id, 'chat'); } catch (e) { toast(errMsg(e), 'error'); } }, 200); } }, { label: 'Laporkan', icon: 'flag', run: () => reportModal(d.id, d.display_name) }])] });
+}
+initProfileCards({ me, startChat: directOpen,
+  showConv: async (cid, uid) => { await loadConvs(); openConv(cid); if (uid) saveContact(uid, 'chat'); },
+  openFull: (d) => (curConv()?.other_id === d.id ? showDmInfo() : openUserFull(d)),
+  report: reportModal,
+  addFriend: async (uid) => { const { error } = await sb.rpc('send_friend_request', { target: uid }); if (error) throw error; } });
+bindProfileTriggers(document);
+initGroupInfo({ me,
+  shareInvite: () => { const c = curConv(); if (c) shareInvite(c.conv_id, c.title || 'Grup', 'grup'); },
+  disappearModal: () => disappearModal(),
+  callGroup: (k) => callFromChat(k),
+  searchChat: () => searchHere(false),
+  exportChat: () => exportChat(curConv()),
+  clearChat: async () => { const c = curConv(); if (!c) return false; const { error } = await sb.rpc('orvix_clear_conversations', { convs: [c.conv_id] }); if (error) { toast(dbErr(error, '13b-hapus-pesan-chat.sql'), 'error'); return false; } toast('Obrolan dibersihkan (hanya untuk kamu)', 'success'); return true; },
+  afterClear: () => { if (history.state?.c) history.back(); else closeConv(); loadConvs(); },
+  openMute: async () => { const c = curConv(); if (!c) return; const u = await mutePicker(isMuted(c)); if (u !== undefined && await prefCall('orvix_mute_conversations', { convs: [c.conv_id], p_until: u }, u ? 'Notifikasi dibisukan' : 'Notifikasi dibunyikan')) paintSub(); },
+  isFav: () => !!curConv()?.pinned,
+  toggleFav: async () => { const c = curConv(); if (!c) return; const { error } = await sb.rpc('orvix_pin_conversations', { convs: [c.conv_id], pin: !c.pinned }); if (error) return toast(dbErr(error, '13b-hapus-pesan-chat.sql'), 'error'); toast(c.pinned ? 'Sematan dilepas' : 'Grup disematkan', 'success'); await loadConvs(); },
+  onChanged: (G) => { const c = curConv(); if (c && G && G.title && c.title !== G.title) { c.title = G.title; renderList(); } },
+  onLeft: () => setTimeout(() => { if (history.state?.c) history.back(); else closeConv(); loadConvs(); }, 220),
+  startChat: (uid) => startChat(uid, []),
+  viewProfile: async (uid) => { const { data, error } = await sb.rpc('orvix_profile_card', { target: uid }); if (error || !data?.[0]) return toast('Pengguna ORVIX tidak ditemukan.', 'error'); openUserFull(data[0]); },
+  similarGroup: async (ids) => { try { const fr = (await fetchFriendships(me.id)).filter((f) => f.status === 'accepted'); groupModal(fr, ids); } catch (e) { toast(errMsg(e), 'error'); } },
+  report: reportModal });
